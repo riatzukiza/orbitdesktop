@@ -1,0 +1,13 @@
+# Development desktop ingress on the existing Knoxx Caddy host. Authentication
+# is enforced by the shared gateway, including every API and WebSocket upgrade.
+orbit.promethean.rest {
+    import common
+    reverse_proxy 172.31.255.1:19084 {
+        header_up -x-open-hax-bridge-auth
+        flush_interval -1
+        transport http {
+            read_timeout 3600s
+            write_timeout 3600s
+        }
+    }
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=Private Orbit shared desktop reverse tunnel to Knoxx ingress
+After=network-online.target orbit-shared-gateway.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o ForwardAgent=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -R 127.0.0.1:19784:127.0.0.1:4321 knoxx-agent-codex
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

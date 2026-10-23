@@ -1,0 +1,189 @@
+# Knoxx Constellation for Orbit
+
+This is an optional, trusted, single-owner development integration. It provides
+one shared Orbit workspace across browsers, a live three-host dashboard,
+workspace/memory tools for Codex, Claude Code and OpenCode, and explicit new-worker
+dispatch from the dashboard. Package version 0.3.1 and workspace schema 12 remain
+unchanged. This does not replace Orbit's Hermes runtime.
+
+## Ownership and placement
+
+```mermaid
+flowchart LR
+  Browser[Stealth or Yoga browser] -->|HTTPS + owner login| Caddy[orbit.promethean.rest / droplet Caddy]
+  Caddy -->|Caddy-only relay + SSH reverse tunnel| Gateway[Shared gateway / Stealth 4321]
+  Gateway --> Orbit[Existing Orbit API / Stealth 4318]
+  Gateway --> Dashboard[Constellation adapter / Stealth 4320]
+  Dashboard --> OP[Existing OpenPlanner / Stealth 7777]
+  Dashboard -->|SSH as err| Yoga[Yoga adapter / local harnesses]
+  Dashboard -->|SSH as codex, loginuid 1002| Droplet[Droplet adapter / codex account]
+  Harnesses[Codex / Claude / OpenCode MCP clients] -->|stdio or finite authenticated tool API| Dashboard
+```
+
+The droplet is the HTTPS ingress. The application and shared workspace store are
+on Stealth. Stealth going offline interrupts the desktop; this is not a highly
+available control plane or replicated Orbit SQLite store. Do not start writers
+against copies of one live database. Other machines keep their local processes
+and working directories; opening the desktop remotely does not move a shell.
+
+Orbit's store remains layout/revision/checkpoint authority. Native harnesses own
+their sessions and permission decisions. OpenPlanner owns its memory APIs.
+Foresight remains the inventory/composition layer. Constellation job files are
+private operational request/result records, not a replacement event kernel,
+transcript archive or board engine. No Rheos board operation is implemented here.
+
+## Components and configuration
+
+- `bridge.py`: Python standard-library host probes, a loopback owner API, native
+  CLI worker adapter and newline-delimited stdio MCP transport.
+- `gateway.mjs`: Node/Orbit `ws`-based ingress with owner login, expiring HttpOnly
+  SameSite cookies, origin checks, static production assets, HTTP/SSE/WebSocket
+  forwarding and a finite remote tool endpoint.
+- `dashboard.html`, `dashboard.js`, `dashboard.css`: reviewed dashboard UI. No
+  third-party scripts or model calls are needed to load it.
+- `src/constellation-session.ts`: optional ingress bootstrap. The gateway marks
+  its HTML, synchronously binds the shared workspace identity, then supplies the
+  owner's existing Orbit token through an authenticated no-store response. The
+  token is held in browser memory, never URL parameters. Ordinary Orbit receives
+  no shared binding and retains its existing manual host connection.
+- The exact `/constellation/` page may be embedded only when that shared binding
+  is active. Arbitrary same-origin pages and generated app frames retain their
+  existing restrictions. The dashboard is trusted host code, not a generated
+  plugin with an implicit privilege grant.
+
+Set `ORBIT_CONSTELLATION_CONFIG` to an owner-only JSON file, or use
+`~/.config/orbit/constellation.json`. It must have mode 0600. See
+`config.example.json`; never commit filled credentials or private runtime data.
+The central config contains the existing OpenPlanner key and OpenCode service
+credential. Peer configs contain their own host configuration and a finite
+controller tool credential, not the Orbit owner token or OpenPlanner key.
+
+Node >=22.12 and Python >=3.10 are required. Use Orbit's installed `ws` package.
+Dispatch uses each machine's existing authenticated CLI and provider policy. It
+does not install models, set model overrides, disable approvals, or bypass
+sandbox settings. Configure project IDs to existing explicit directories; a user
+cannot submit an arbitrary working directory through the HTTP API.
+
+## Agent to desktop
+
+Register the stdio command with each harness using an absolute script path:
+
+```sh
+codex mcp add orbit-constellation -- python3 /path/to/bridge.py mcp
+claude mcp add --scope user orbit-constellation -- python3 /path/to/bridge.py mcp
+```
+
+OpenCode's MCP entry uses `type: "local"`,
+`command: ["python3", "/path/to/bridge.py", "mcp"]`, `enabled: true`.
+If its config is generated, change the canonical configuration source, not the
+generated JSON. Its authenticated `POST /mcp` endpoint can attach the adapter to
+an already running server without terminating sessions. Existing Codex/Claude
+clients may need a new session or MCP reconnect to discover a newly registered
+server. Registration does not inject tools into an already running desktop chat.
+
+The tools are:
+
+| Tool | Authority |
+| --- | --- |
+| `orbit_fleet` | Current configured host probes and OpenPlanner observations |
+| `orbit_workspace_read` | Shared workspace layout, no terminal/chat contents |
+| `orbit_workspace_apply` | Existing Orbit validated operations with explicit base revision, operation ID and intent |
+| `orbit_memory_search` | Bounded OpenPlanner full-text search |
+| `orbit_projects` | Explicit project IDs and installed harnesses for one host |
+| `orbit_jobs` | Public status and answers for Orbit-created workers |
+
+The tool surface does not dispatch other agents. The dashboard's explicit owner
+action owns new-worker dispatch. MCP clients on peers call only
+`POST /constellation/api/tool` over authenticated HTTPS. That bearer credential
+does not unlock the owner browser session or arbitrary Orbit APIs. Layout writes
+are limited to the existing shared-workspace capability and its native checks.
+
+## Desktop to agent
+
+The owner chooses a host, harness, registered project and exact prompt, then
+checks the explicit start confirmation. The resulting target is a **new CLI
+worker**, not an existing Codex desktop chat, Claude conversation or OpenCode
+session. Existing native sessions are visible as metadata; resuming/messaging
+them is separate follow-up integration.
+
+The adapter persists an operation UUID before launch. Exact retries return the
+same record; reuse with changed input is refused. Remote requests are JSON on
+SSH stdin, never interpolated shell fragments. Prompts are sent to CLI stdin.
+Only public assistant text and native session identity are projected into the
+dashboard; tool arguments, reasoning events and provider credentials are not.
+Workers have a 15-minute runtime limit and a 10 MB output limit. A missing worker
+identity or departed process becomes `outcome_unknown`; it is not replayed.
+Native CLI sandbox/permission behavior still controls what a task can do.
+
+This first version shows final answers in private job records. It does not
+automatically ingest every worker transcript into OpenPlanner or claim that all
+historical harness contexts share one memory partition. Explicit context
+transfer, native session continuation, live token streaming, central hosting
+independent of Stealth, and Axxium SSO are follow-up work.
+
+## Current deployment (observed 2026-10-23)
+
+| Location | Installed/observed behavior |
+| --- | --- |
+| Stealth | Existing PM2 Orbit API/Vite and Hermes retained; new user services `orbit-constellation`, `orbit-shared-gateway`, `orbit-ingress-tunnel` |
+| Yoga | Metadata adapter and all three MCP registrations; OpenCode attached live |
+| Droplet | Caddy exact-host TLS, dedicated private relay, account-scoped probe; no CLI harness installed in codex's account |
+| Shared workspace | Existing `a287d991-f478-44e9-825f-1b795d454176`; existing panes retained, Constellation window added through native revision/checkpoint API |
+
+Ingress source templates are in this directory. Caddy's managed include is
+`/srv/open-hax/state/caddy/managed/orbit-desktop.caddy`; it is preserved by the
+existing Services-managed wildcard import. The socket listens at
+`172.31.255.1:19084`, allows only Caddy's `172.31.255.2` source, and relays to the
+loopback SSH listener at `127.0.0.1:19784`. The Stealth tunnel authenticates as
+`knoxx-agent-codex`; no SSH agent forwarding is used. The public DNS A record is
+DNS-only at `157.245.125.134`; Caddy owns exact-host TLS.
+
+The source templates and this record are reviewable product-repository artifacts;
+no Services promotion workflow or Foresight manifest registration is claimed.
+This is a directly activated development desktop route, not a production-qualified
+release. Review and adoption into the canonical Services controller remain separate.
+
+Access [the desktop](https://orbit.promethean.rest/) or
+[the dashboard](https://orbit.promethean.rest/constellation/) using the existing
+Orbit owner token. It is read from the private runtime `session-token` file;
+no credential is included in documentation, screenshots or committed config.
+
+## Verification and recovery
+
+Run `npm run check`, then these focused checks:
+
+```sh
+python3 -m unittest discover -s integrations/constellation -p 'test_bridge.py' -v
+node --experimental-strip-types --test integrations/constellation/test-surface.mjs
+node integrations/constellation/test-browser.mjs
+```
+
+The browser journey creates a **separate workspace**, uses the real Orbit API,
+renders the actual dashboard iframe and performs real host probes and memory
+search. It checks owner login, denied anonymous APIs, foreign origins, controller
+token confinement, shared identity, revision acknowledgement and mobile overflow.
+It never invokes a model or treats the owner's workspace as a test fixture.
+`ORBIT_TEST_BROWSER`, `ORBIT_TEST_SCRATCH` and `ORBIT_TEST_SCREENSHOT` can select
+the browser, private test directory and screenshot location.
+
+Changing the integration does not require restarting the existing Orbit/Hermes
+services. Build into an isolated directory; place the verified output in a new
+private adapter release directory, then update the gateway configuration. Keep
+the previous directory and matching source for rollback. The initial deployment
+has no replaced adapter release. Never overwrite an existing rollback bundle.
+
+To withdraw external access, stop the **new** `orbit-ingress-tunnel` user service.
+To withdraw the adapter, stop its two new user services after checking its job
+records for accepted/running work. Preserve those records and reconcile unknown
+submissions; stopping an adapter is not cancellation of a native worker. Existing
+PM2 Orbit, Hermes and terminal processes are separately owned and stay in place.
+Remove/revert the dashboard through Orbit's controller/checkpoint UI, never by
+editing SQLite or old receipts. Remove MCP registrations through each harness's
+configuration authority. Preserve the Caddy, relay and DNS source records before
+any separate infrastructure removal. Layout checkpoints do not undo host effects.
+
+The adapter is not included in the portable Hermes source archive. The small
+optional frontend bootstrap **is** included and archive parity must be checked
+after changing included source. Full-repository installation supplies this adapter.
+
+SPDX-License-Identifier: GPL-3.0-or-later

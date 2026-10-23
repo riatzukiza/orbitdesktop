@@ -1,0 +1,19 @@
+{
+  "host": "stealth",
+  "port": 4320,
+  "gateway_port": 4321,
+  "orbit_port": 4318,
+  "public_origin": "https://orbit.promethean.rest",
+  "workspace_id": "REPLACE_WITH_EXISTING_WORKSPACE_UUID",
+  "orbit_runtime": "/absolute/orbit/.runtime",
+  "orbit_token_file": "/absolute/orbit/.runtime/session-token",
+  "dist": "/absolute/private/verified-build",
+  "state": "/absolute/private/constellation-state",
+  "token": "GENERATE_A_PRIVATE_RANDOM_CONTROLLER_TOKEN",
+  "origins": ["https://orbit.promethean.rest", "http://127.0.0.1:4321"],
+  "projects": {"orbitdesktop": "/absolute/orbit"},
+  "openplanner": {"url": "http://127.0.0.1:7777", "token": "CONFIGURE_PRIVATELY"},
+  "opencode": {"url": "http://127.0.0.1:8097", "basic": "opencode:CONFIGURE_PRIVATELY"},
+  "peers": {},
+  "links": {"Knoxx": "https://knoxx.promethean.rest"}
+}

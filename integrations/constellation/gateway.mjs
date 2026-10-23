@@ -1,0 +1,335 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Trusted single-owner ingress; existing Orbit retains API and PTY authority.
+import http from "node:http";
+import fs from "node:fs";
+import crypto from "node:crypto";
+import path from "node:path";
+import { WebSocketServer, WebSocket } from "ws";
+const configPath = process.env.ORBIT_CONSTELLATION_CONFIG;
+if (!configPath || fs.statSync(configPath).mode & 0o077)
+  throw Error("Owner-only configuration required");
+const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const orbitToken = fs.readFileSync(cfg.orbit_token_file, "utf8").trim();
+const secret = crypto.randomBytes(32),
+  port = cfg.gateway_port;
+const origins = new Set([cfg.public_origin, `http://127.0.0.1:${port}`]);
+const hosts = new Set([...origins].map((v) => new URL(v).host));
+const equal = (a, b) =>
+  typeof a === "string" &&
+  Buffer.byteLength(a) === Buffer.byteLength(b) &&
+  crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const sign = (v) =>
+  crypto.createHmac("sha256", secret).update(v).digest("base64url");
+const cookieName = "orbit_constellation_owner";
+let loginAttempts = [];
+function authenticated(req) {
+  const raw =
+    (req.headers.cookie || "")
+      .split(";")
+      .map((v) => v.trim())
+      .find((v) => v.startsWith(cookieName + "="))
+      ?.slice(cookieName.length + 1) || "";
+  const [expiry, nonce, signature] = raw.split(".");
+  return (
+    /^\d+$/.test(expiry || "") &&
+    Number(expiry) > Date.now() &&
+    Number(expiry) < Date.now() + 13 * 3600000 &&
+    equal(signature, sign(expiry + "." + nonce))
+  );
+}
+const headers = (type = "text/html; charset=utf-8") => ({
+  "Content-Type": type,
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin",
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'",
+});
+function reply(res, status, data, type) {
+  res.writeHead(status, headers(type));
+  res.end(data);
+}
+const login = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unlock Knoxx desktop</title><style>body{background:#0b1015;color:#dce6ee;font:15px system-ui;display:grid;place-items:center;min-height:95vh}main{width:min(380px,85vw)}small{color:#b9d990;letter-spacing:.2em}h1{font-weight:500;letter-spacing:-.04em}p{color:#8b9ead;line-height:1.6}input,button{font:inherit;padding:12px;border:1px solid #344653;border-radius:6px;box-sizing:border-box;width:100%;margin:8px 0;background:#14202c;color:#dce6ee}button{background:#c3e89e;color:#132219;font-weight:600;cursor:pointer}</style></head><body><main><small>ORBIT × KNOXX</small><h1>One shared desktop.</h1><p>Unlock your workspace with the existing Orbit owner token. Agent processes stay on their own machines.</p><form action="/login" method="post"><label for="token">Orbit owner token</label><input id="token" name="token" type="password" required autocomplete="off"><button>Unlock desktop</button></form><p>The token stays within this trusted Orbit connection. No token is placed in a URL.</p></main></body></html>`;
+async function body(req, max) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > max) throw Error("Body exceeds limit");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+function proxy(req, res, targetPort, path, raw, extra = {}) {
+  const upstream = http.request(
+    {
+      host: "127.0.0.1",
+      port: targetPort,
+      path,
+      method: req.method,
+      headers: {
+        ...req.headers,
+        host: `127.0.0.1:${targetPort}`,
+        ...(req.headers.origin
+          ? { origin: `http://127.0.0.1:${targetPort}` }
+          : {}),
+        ...extra,
+        ...(raw ? { "content-length": raw.length } : {}),
+        cookie: "",
+      },
+    },
+    (up) => {
+      if (
+        path === "/" &&
+        up.statusCode === 200 &&
+        String(up.headers["content-type"]).includes("text/html")
+      ) {
+        const chunks = [];
+        up.on("data", (chunk) => chunks.push(chunk));
+        up.on("end", () => {
+          const html = Buffer.concat(chunks)
+            .toString()
+            .replace(
+              '<html lang="en">',
+              '<html lang="en" data-orbit-shared="1">',
+            );
+          const outHeaders = { ...up.headers, "cache-control": "no-store" };
+          delete outHeaders["content-length"];
+          delete outHeaders["content-encoding"];
+          res.writeHead(up.statusCode, outHeaders);
+          res.end(html);
+        });
+      } else {
+        res.writeHead(up.statusCode, up.headers);
+        up.pipe(res);
+      }
+    },
+  );
+  upstream.on("error", () => {
+    if (!res.headersSent)
+      reply(res, 502, "Shared desktop upstream unavailable.");
+    else res.end();
+  });
+  res.on("close", () => upstream.destroy());
+  if (raw) upstream.end(raw);
+  else req.pipe(upstream);
+}
+const server = http.createServer(async (req, res) => {
+  try {
+    if (!hosts.has(req.headers.host)) return reply(res, 403, "Host rejected.");
+    const origin = req.headers.origin;
+    if (origin && !origins.has(origin))
+      return reply(res, 403, "Origin rejected.");
+    const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/health")
+      return reply(
+        res,
+        200,
+        JSON.stringify({ ok: true, service: "orbit-shared-gateway" }),
+        "application/json",
+      );
+    if (url.pathname === "/login" && req.method === "GET")
+      return reply(res, 200, login);
+    if (url.pathname === "/login" && req.method === "POST") {
+      if (!origin || !origins.has(origin))
+        return reply(res, 403, "Same-origin login required.");
+      const current = Date.now();
+      loginAttempts = loginAttempts.filter((t) => current - t < 60000);
+      if (loginAttempts.length >= 12)
+        return reply(res, 429, "Try again in one minute.");
+      loginAttempts.push(current);
+      const form = new URLSearchParams((await body(req, 4096)).toString());
+      if (!equal(form.get("token"), orbitToken)) return reply(res, 401, login);
+      const value =
+        String(Date.now() + 12 * 3600000) +
+        "." +
+        crypto.randomBytes(24).toString("base64url");
+      const secure =
+        req.headers.host === new URL(cfg.public_origin).host ? "; Secure" : "";
+      res.writeHead(303, {
+        ...headers(),
+        "Set-Cookie": `${cookieName}=${value}.${sign(value)}; Path=/; HttpOnly; SameSite=Strict${secure}; Max-Age=43200`,
+        Location: "/",
+      });
+      return res.end();
+    }
+    // Remote MCP clients receive only the finite tool surface, never an owner
+    // browser session, session bootstrap token or unrestricted Orbit API proxy.
+    if (
+      url.pathname === "/constellation/api/tool" &&
+      req.method === "POST" &&
+      equal(req.headers.authorization, "Bearer " + cfg.token)
+    ) {
+      return proxy(req, res, cfg.port, "/api/tool", await body(req, 65536), {
+        authorization: "Bearer " + cfg.token,
+      });
+    }
+    if (!authenticated(req)) {
+      if (
+        url.pathname.startsWith("/api/") ||
+        url.pathname.startsWith("/constellation/api/") ||
+        url.pathname === "/constellation/session"
+      )
+        return reply(
+          res,
+          401,
+          '{"error":"Owner login required"}',
+          "application/json",
+        );
+      res.writeHead(303, { ...headers(), Location: "/login" });
+      return res.end();
+    }
+    if (
+      !["GET", "HEAD"].includes(req.method) &&
+      (!origin || !origins.has(origin))
+    )
+      return reply(res, 403, "Same-origin action required.");
+    if (url.pathname === "/constellation/session" && req.method === "GET")
+      return reply(
+        res,
+        200,
+        JSON.stringify({ workspace_id: cfg.workspace_id, token: orbitToken }),
+        "application/json",
+      );
+    if (url.pathname === "/constellation/bootstrap.js" && req.method === "GET")
+      return reply(
+        res,
+        200,
+        `localStorage.setItem('orbit.workspace.id',${JSON.stringify(cfg.workspace_id)});`,
+        "text/javascript",
+      );
+    if (url.pathname === "/constellation") {
+      res.writeHead(303, {
+        Location: "/constellation/",
+        "Cache-Control": "no-store",
+      });
+      return res.end();
+    }
+    if (url.pathname.startsWith("/constellation/")) {
+      const raw = ["GET", "HEAD"].includes(req.method)
+        ? undefined
+        : await body(req, 65536);
+      return proxy(
+        req,
+        res,
+        cfg.port,
+        url.pathname.slice("/constellation".length) + url.search,
+        raw,
+        { authorization: "Bearer " + cfg.token },
+      );
+    }
+    if (
+      ["GET", "HEAD"].includes(req.method) &&
+      !url.pathname.startsWith("/api/") &&
+      !url.pathname.startsWith("/apps/") &&
+      !url.pathname.startsWith("/vendor/") &&
+      !url.pathname.startsWith("/recovery")
+    ) {
+      const root = fs.realpathSync(cfg.dist);
+      const filename = fs.realpathSync(
+        path.join(
+          root,
+          decodeURIComponent(
+            url.pathname === "/" ? "index.html" : url.pathname,
+          ),
+        ),
+      );
+      if (
+        !filename.startsWith(root + path.sep) ||
+        !fs.statSync(filename).isFile()
+      )
+        return reply(res, 404, "Not found.");
+      const types = {
+        ".html": "text/html; charset=utf-8",
+        ".js": "text/javascript",
+        ".css": "text/css",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".woff2": "font/woff2",
+        ".wasm": "application/wasm",
+        ".json": "application/json",
+      };
+      let data = fs.readFileSync(filename);
+      if (url.pathname === "/")
+        data = Buffer.from(
+          data
+            .toString()
+            .replace(
+              '<html lang="en">',
+              '<html lang="en" data-orbit-shared="1">',
+            )
+            .replace(
+              "<head>",
+              '<head><script src="/constellation/bootstrap.js"></script>',
+            ),
+        );
+      res.writeHead(200, {
+        ...headers(types[path.extname(filename)] || "application/octet-stream"),
+        "Content-Security-Policy":
+          "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https: http:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      return res.end(req.method === "HEAD" ? undefined : data);
+    }
+    const raw = ["GET", "HEAD"].includes(req.method)
+      ? undefined
+      : await body(req, 2_000_000);
+    if (
+      raw &&
+      String(req.headers["content-type"]).startsWith("application/json")
+    ) {
+      const value = JSON.parse(raw);
+      if (value.workspace_id && value.workspace_id !== cfg.workspace_id)
+        return reply(res, 403, "Shared workspace mismatch.");
+    }
+    return proxy(req, res, cfg.orbit_port, url.pathname + url.search, raw, {
+      "accept-encoding": "identity",
+    });
+  } catch {
+    if (!res.headersSent) reply(res, 400, "Invalid request.");
+    else res.end();
+  }
+});
+const wss = new WebSocketServer({ noServer: true, maxPayload: 2_000_000 });
+server.on("upgrade", (req, socket, head) => {
+  if (
+    !hosts.has(req.headers.host) ||
+    !origins.has(req.headers.origin) ||
+    !authenticated(req) ||
+    !req.url.startsWith("/api/")
+  ) {
+    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (client) => {
+    const upstream = new WebSocket(
+      `ws://127.0.0.1:${cfg.orbit_port}${req.url}`,
+      { headers: { Origin: `http://127.0.0.1:${cfg.orbit_port}` } },
+    );
+    const queued = [];
+    let bytes = 0;
+    client.on("message", (raw, binary) => {
+      if (upstream.readyState === WebSocket.OPEN)
+        upstream.send(raw, { binary });
+      else if (
+        upstream.readyState === WebSocket.CONNECTING &&
+        (bytes += raw.length) < 65536
+      )
+        queued.push([raw, binary]);
+      else client.close(1008);
+    });
+    upstream.on("open", () => {
+      for (const [raw, binary] of queued) upstream.send(raw, { binary });
+      queued.length = 0;
+    });
+    upstream.on("message", (raw, binary) => {
+      if (client.readyState === WebSocket.OPEN) client.send(raw, { binary });
+    });
+    upstream.on("close", () => client.close());
+    client.on("close", () => upstream.close());
+    upstream.on("error", () => client.close(1011));
+    client.on("error", () => upstream.close());
+  });
+});
+server.listen(port, "127.0.0.1", () =>
+  console.log(`Orbit shared owner gateway listening on loopback ${port}`),
+);

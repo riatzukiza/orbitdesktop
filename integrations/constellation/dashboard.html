@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Knoxx · Constellation</title>
+    <link rel="stylesheet" href="dashboard.css" />
+    <script src="dashboard.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/" target="_top"
+        ><span class="orbit">◎</span> KNOXX
+        <span class="muted">/ constellation</span></a
+      >
+      <div class="live">
+        <span id="light"></span><span id="freshness">Connecting</span>
+      </div>
+      <button id="refresh">Refresh</button>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <div class="eyebrow">YOUR DISTRIBUTED WORKSPACE</div>
+          <h1>Many machines.<br /><span>One field of view.</span></h1>
+          <p>
+            Agent harnesses, working contexts, and memory — connected through
+            Orbit.
+          </p>
+        </div>
+        <div class="legend">
+          <span class="tag green">Observed</span> Live host probes<br /><span
+            class="tag"
+            >Recorded</span
+          >
+          Session history<br /><span class="tag amber">Unknown</span> No
+          evidence of liveness
+        </div>
+      </section>
+      <form id="unlock" hidden>
+        <label
+          >Dashboard token
+          <input
+            id="token"
+            type="password"
+            autocomplete="off"
+            required /></label
+        ><button>Unlock</button>
+        <p class="muted">
+          Use the shared desktop login for remote access. Local API access
+          requires the private dashboard token.
+        </p>
+      </form>
+      <p role="status" id="error" hidden></p>
+      <section aria-label="Machines" id="hosts" class="hosts"></section>
+      <div class="columns">
+        <section class="panel">
+          <div class="section-head">
+            <h2>Harness contexts</h2>
+            <select id="filter" aria-label="Filter harness">
+              <option value="all">All harnesses</option>
+              <option>codex</option>
+              <option>claude</option>
+              <option>opencode</option>
+            </select>
+          </div>
+          <p class="muted">
+            Recent session metadata. A recorded session is not proof of a
+            running turn.
+          </p>
+          <div id="sessions"></div>
+        </section>
+        <div class="right-column">
+          <section class="panel">
+            <div class="section-head">
+              <h2>OpenPlanner memory</h2>
+              <span id="memory-status" class="tag">Checking</span>
+            </div>
+            <div id="memory-stats" class="metrics"></div>
+            <p id="embedding" class="muted"></p>
+            <form id="search">
+              <label for="query">Find a context, idea, or memory</label>
+              <div class="search-row">
+                <input
+                  id="query"
+                  placeholder="Search the shared memory…"
+                  maxlength="500"
+                  required
+                /><button>Search</button>
+              </div>
+            </form>
+            <div id="results" aria-live="polite"></div>
+            <details>
+              <summary>Memory service evidence</summary>
+              <pre id="memory-evidence"></pre>
+            </details>
+          </section>
+          <section class="panel">
+            <h2>Connected surfaces</h2>
+            <nav id="links"></nav>
+            <p class="muted">
+              Orbit owns the desktop layout. Harnesses own their turns.
+              OpenPlanner owns the memory API. Foresight records the
+              constellation.
+            </p>
+          </section>
+        </div>
+      </div>
+      <section class="panel dispatch">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">EXPLICIT HANDOFF</div>
+            <h2>Give a harness a task</h2>
+          </div>
+          <span class="tag">New CLI worker</span>
+        </div>
+        <p class="muted">
+          Choose the host and a configured project. This starts a separate
+          worker with that harness’s normal permissions and provider
+          configuration. Existing desktop conversations are not resumed.
+        </p>
+        <form id="dispatch">
+          <div class="dispatch-fields">
+            <label>Machine<select id="target"></select></label
+            ><label
+              >Harness<select id="harness">
+                <option>codex</option>
+                <option>claude</option>
+                <option>opencode</option>
+              </select></label
+            ><label>Project<select id="project"></select></label>
+          </div>
+          <label
+            >Task<textarea
+              id="prompt"
+              rows="3"
+              maxlength="12000"
+              placeholder="Describe the outcome and the context to use…"
+              required
+            ></textarea>
+          </label>
+          <div class="dispatch-actions">
+            <label
+              ><input id="confirm" type="checkbox" required /> Start this worker
+              on the selected machine</label
+            ><button id="send">Start worker</button>
+          </div>
+        </form>
+        <p id="dispatch-status" role="status"></p>
+        <div id="jobs"></div>
+      </section>
+      <footer>
+        <span>Orbit × Knoxx × Foresight</span
+        ><span>Metadata is a projection. Authority stays with the source.</span>
+      </footer>
+    </main>
+  </body>
+</html>
