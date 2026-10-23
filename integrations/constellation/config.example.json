@@ -11,9 +11,22 @@
   "state": "/absolute/private/constellation-state",
   "token": "GENERATE_A_PRIVATE_RANDOM_CONTROLLER_TOKEN",
   "origins": ["https://orbit.promethean.rest", "http://127.0.0.1:4321"],
-  "projects": {"orbitdesktop": "/absolute/orbit"},
-  "openplanner": {"url": "http://127.0.0.1:7777", "token": "CONFIGURE_PRIVATELY"},
-  "opencode": {"url": "http://127.0.0.1:8097", "basic": "opencode:CONFIGURE_PRIVATELY"},
+  "projects": { "orbitdesktop": "/absolute/orbit" },
+  "openplanner": {
+    "url": "http://127.0.0.1:7777",
+    "token": "CONFIGURE_PRIVATELY"
+  },
+  "opencode": {
+    "url": "http://127.0.0.1:8097",
+    "basic": "opencode:CONFIGURE_PRIVATELY"
+  },
   "peers": {},
-  "links": {"Knoxx": "https://knoxx.promethean.rest"}
+  "links": { "Knoxx": "https://knoxx.promethean.rest" },
+  "axxium": {
+    "issuer": "https://axxium.promethean.rest/oidc",
+    "client_id": "orbit-desktop",
+    "client_secret": "CONFIGURE_PRIVATELY_WITH_AT_LEAST_32_RANDOM_CHARACTERS",
+    "allowed_subjects": ["actor_approved-human-uuid"],
+    "allow_owner_token": false
+  }
 }

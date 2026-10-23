@@ -5,11 +5,16 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
+import { createAxxiumAuth, AUTH_PATHS } from "./axxium-auth.mjs";
 const configPath = process.env.ORBIT_CONSTELLATION_CONFIG;
 if (!configPath || fs.statSync(configPath).mode & 0o077)
   throw Error("Owner-only configuration required");
 const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const orbitToken = fs.readFileSync(cfg.orbit_token_file, "utf8").trim();
+const axxium = createAxxiumAuth({
+  config: cfg.axxium,
+  origin: cfg.public_origin,
+});
 const secret = crypto.randomBytes(32),
   port = cfg.gateway_port;
 const origins = new Set([cfg.public_origin, `http://127.0.0.1:${port}`]);
@@ -22,7 +27,7 @@ const sign = (v) =>
   crypto.createHmac("sha256", secret).update(v).digest("base64url");
 const cookieName = "orbit_constellation_owner";
 let loginAttempts = [];
-function authenticated(req) {
+function legacyAuthenticated(req) {
   const raw =
     (req.headers.cookie || "")
       .split(";")
@@ -37,6 +42,14 @@ function authenticated(req) {
     equal(signature, sign(expiry + "." + nonce))
   );
 }
+async function authenticated(req) {
+  if (axxium) {
+    const identity = await axxium.authenticate(req);
+    if (identity) return identity;
+    if (!axxium.allowOwnerToken) return null;
+  }
+  return legacyAuthenticated(req) ? { source: "explicit-owner-token" } : null;
+}
 const headers = (type = "text/html; charset=utf-8") => ({
   "Content-Type": type,
   "Cache-Control": "no-store",
@@ -49,7 +62,8 @@ function reply(res, status, data, type) {
   res.writeHead(status, headers(type));
   res.end(data);
 }
-const login = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unlock Knoxx desktop</title><style>body{background:#0b1015;color:#dce6ee;font:15px system-ui;display:grid;place-items:center;min-height:95vh}main{width:min(380px,85vw)}small{color:#b9d990;letter-spacing:.2em}h1{font-weight:500;letter-spacing:-.04em}p{color:#8b9ead;line-height:1.6}input,button{font:inherit;padding:12px;border:1px solid #344653;border-radius:6px;box-sizing:border-box;width:100%;margin:8px 0;background:#14202c;color:#dce6ee}button{background:#c3e89e;color:#132219;font-weight:600;cursor:pointer}</style></head><body><main><small>ORBIT × KNOXX</small><h1>One shared desktop.</h1><p>Unlock your workspace with the existing Orbit owner token. Agent processes stay on their own machines.</p><form action="/login" method="post"><label for="token">Orbit owner token</label><input id="token" name="token" type="password" required autocomplete="off"><button>Unlock desktop</button></form><p>The token stays within this trusted Orbit connection. No token is placed in a URL.</p></main></body></html>`;
+const ownerForm = `<form action="/login" method="post"><label for="token">Orbit owner token</label><input id="token" name="token" type="password" required autocomplete="off"><button>Unlock desktop</button></form>`;
+const login = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unlock Knoxx desktop</title><style>body{background:#0b1015;color:#dce6ee;font:15px system-ui;display:grid;place-items:center;min-height:95vh}main{width:min(380px,85vw)}small{color:#b9d990;letter-spacing:.2em}h1{font-weight:500;letter-spacing:-.04em}p{color:#8b9ead;line-height:1.6}input,button,.sign-in{font:inherit;padding:12px;border:1px solid #344653;border-radius:6px;box-sizing:border-box;width:100%;margin:8px 0;background:#14202c;color:#dce6ee}button,.sign-in{background:#c3e89e;color:#132219;font-weight:600;cursor:pointer}.sign-in{display:block;text-align:center;text-decoration:none}details{margin-top:24px;color:#8b9ead}summary{cursor:pointer}</style></head><body><main><small>ORBIT × KNOXX</small><h1>One shared desktop.</h1>${axxium ? `<p>Use your Axxium identity to open your desktop and connected harnesses.</p><a class="sign-in" href="${AUTH_PATHS.start}">Sign in with Axxium</a>${axxium.allowOwnerToken ? `<details><summary>Existing development owner access</summary><p>The owner-token route remains explicitly available while shared sign-in is being activated.</p>${ownerForm}</details>` : ""}` : `<p>Unlock your workspace with the existing Orbit owner token. Agent processes stay on their own machines.</p>${ownerForm}`}<p>Your account credentials stay with the identity service.</p></main></body></html>`;
 async function body(req, max) {
   const chunks = [];
   let size = 0;
@@ -111,6 +125,25 @@ function proxy(req, res, targetPort, path, raw, extra = {}) {
     else res.end();
   });
   res.on("close", () => upstream.destroy());
+  if (axxium && req.orbitBrowserIdentity) {
+    let checking = false;
+    const recheck = setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        if (!(await authenticated(req))) {
+          upstream.destroy();
+          res.destroy();
+        }
+      } catch {
+        upstream.destroy();
+        res.destroy();
+      } finally {
+        checking = false;
+      }
+    }, 10000);
+    res.on("close", () => clearInterval(recheck));
+  }
   if (raw) upstream.end(raw);
   else req.pipe(upstream);
 }
@@ -130,7 +163,57 @@ const server = http.createServer(async (req, res) => {
       );
     if (url.pathname === "/login" && req.method === "GET")
       return reply(res, 200, login);
+    if (axxium && url.pathname === AUTH_PATHS.status && req.method === "GET")
+      return reply(
+        res,
+        200,
+        JSON.stringify(await axxium.status()),
+        "application/json",
+      );
+    if (axxium && url.pathname === AUTH_PATHS.start && req.method === "GET") {
+      const result = await axxium.start();
+      res.writeHead(303, {
+        ...headers(),
+        "Set-Cookie": result.cookies,
+        Location: result.location,
+      });
+      return res.end();
+    }
+    if (
+      axxium &&
+      url.pathname === AUTH_PATHS.callback &&
+      req.method === "GET"
+    ) {
+      const result = await axxium.complete(
+        req,
+        new URL(req.url, cfg.public_origin),
+      );
+      res.writeHead(303, {
+        ...headers(),
+        "Set-Cookie": [
+          ...result.cookies,
+          `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+        ],
+        Location: result.location,
+      });
+      return res.end();
+    }
+    if (axxium && url.pathname === AUTH_PATHS.logout && req.method === "POST") {
+      if (origin !== cfg.public_origin)
+        return reply(res, 403, "Same-origin logout required.");
+      const result = await axxium.logout(req);
+      res.writeHead(result.status, {
+        ...headers("application/json"),
+        "Set-Cookie": [
+          ...result.cookies,
+          `${cookieName}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+        ],
+      });
+      return res.end(JSON.stringify(result.body));
+    }
     if (url.pathname === "/login" && req.method === "POST") {
+      if (axxium && !axxium.allowOwnerToken)
+        return reply(res, 403, "Use Axxium to sign in to this desktop.");
       if (!origin || !origins.has(origin))
         return reply(res, 403, "Same-origin login required.");
       const current = Date.now();
@@ -164,7 +247,8 @@ const server = http.createServer(async (req, res) => {
         authorization: "Bearer " + cfg.token,
       });
     }
-    if (!authenticated(req)) {
+    const identity = await authenticated(req);
+    if (!identity) {
       if (
         url.pathname.startsWith("/api/") ||
         url.pathname.startsWith("/constellation/api/") ||
@@ -179,6 +263,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(303, { ...headers(), Location: "/login" });
       return res.end();
     }
+    req.orbitBrowserIdentity = identity;
     if (
       !["GET", "HEAD"].includes(req.method) &&
       (!origin || !origins.has(origin))
@@ -188,7 +273,11 @@ const server = http.createServer(async (req, res) => {
       return reply(
         res,
         200,
-        JSON.stringify({ workspace_id: cfg.workspace_id, token: orbitToken }),
+        JSON.stringify({
+          workspace_id: cfg.workspace_id,
+          token: orbitToken,
+          identity,
+        }),
         "application/json",
       );
     if (url.pathname === "/constellation/bootstrap.js" && req.method === "GET")
@@ -284,51 +373,74 @@ const server = http.createServer(async (req, res) => {
     return proxy(req, res, cfg.orbit_port, url.pathname + url.search, raw, {
       "accept-encoding": "identity",
     });
-  } catch {
-    if (!res.headersSent) reply(res, 400, "Invalid request.");
+  } catch (error) {
+    if (!res.headersSent)
+      reply(
+        res,
+        error.status || 400,
+        error.status ? error.message : "Invalid request.",
+      );
     else res.end();
   }
 });
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2_000_000 });
-server.on("upgrade", (req, socket, head) => {
-  if (
-    !hosts.has(req.headers.host) ||
-    !origins.has(req.headers.origin) ||
-    !authenticated(req) ||
-    !req.url.startsWith("/api/")
-  ) {
-    socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-    return;
+server.on("upgrade", async (req, socket, head) => {
+  try {
+    if (
+      !hosts.has(req.headers.host) ||
+      !origins.has(req.headers.origin) ||
+      !(await authenticated(req)) ||
+      !req.url.startsWith("/api/")
+    ) {
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (client) => {
+      const upstream = new WebSocket(
+        `ws://127.0.0.1:${cfg.orbit_port}${req.url}`,
+        { headers: { Origin: `http://127.0.0.1:${cfg.orbit_port}` } },
+      );
+      const queued = [];
+      let bytes = 0;
+      client.on("message", (raw, binary) => {
+        if (upstream.readyState === WebSocket.OPEN)
+          upstream.send(raw, { binary });
+        else if (
+          upstream.readyState === WebSocket.CONNECTING &&
+          (bytes += raw.length) < 65536
+        )
+          queued.push([raw, binary]);
+        else client.close(1008);
+      });
+      upstream.on("open", () => {
+        for (const [raw, binary] of queued) upstream.send(raw, { binary });
+        queued.length = 0;
+      });
+      upstream.on("message", (raw, binary) => {
+        if (client.readyState === WebSocket.OPEN) client.send(raw, { binary });
+      });
+      upstream.on("close", () => client.close());
+      client.on("close", () => upstream.close());
+      upstream.on("error", () => client.close(1011));
+      client.on("error", () => upstream.close());
+      let checking = false;
+      const recheck = setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        try {
+          if (!(await authenticated(req)))
+            client.close(1008, "Desktop identity session ended");
+        } catch {
+          client.close(1011, "Identity authority unavailable");
+        } finally {
+          checking = false;
+        }
+      }, 10000);
+      client.on("close", () => clearInterval(recheck));
+    });
+  } catch {
+    socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
   }
-  wss.handleUpgrade(req, socket, head, (client) => {
-    const upstream = new WebSocket(
-      `ws://127.0.0.1:${cfg.orbit_port}${req.url}`,
-      { headers: { Origin: `http://127.0.0.1:${cfg.orbit_port}` } },
-    );
-    const queued = [];
-    let bytes = 0;
-    client.on("message", (raw, binary) => {
-      if (upstream.readyState === WebSocket.OPEN)
-        upstream.send(raw, { binary });
-      else if (
-        upstream.readyState === WebSocket.CONNECTING &&
-        (bytes += raw.length) < 65536
-      )
-        queued.push([raw, binary]);
-      else client.close(1008);
-    });
-    upstream.on("open", () => {
-      for (const [raw, binary] of queued) upstream.send(raw, { binary });
-      queued.length = 0;
-    });
-    upstream.on("message", (raw, binary) => {
-      if (client.readyState === WebSocket.OPEN) client.send(raw, { binary });
-    });
-    upstream.on("close", () => client.close());
-    client.on("close", () => upstream.close());
-    upstream.on("error", () => client.close(1011));
-    client.on("error", () => upstream.close());
-  });
 });
 server.listen(port, "127.0.0.1", () =>
   console.log(`Orbit shared owner gateway listening on loopback ${port}`),

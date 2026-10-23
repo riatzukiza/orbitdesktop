@@ -119,7 +119,86 @@ This first version shows final answers in private job records. It does not
 automatically ingest every worker transcript into OpenPlanner or claim that all
 historical harness contexts share one memory partition. Explicit context
 transfer, native session continuation, live token streaming, central hosting
-independent of Stealth, and Axxium SSO are follow-up work.
+independent of Stealth remain follow-up work. The Axxium consumer is implemented
+as described below; its live issuer activation remains pending.
+
+## Shared Axxium identity
+
+The optional `axxium` configuration enables the same fixed issuer used by the
+stack's existing shared-login contract:
+`https://axxium.promethean.rest/oidc`. `openid-client` is pinned to 6.8.8, matching
+the other prepared consumers. Axxium owns identity and root-session authority;
+Orbit grants access only to explicit stable actor subjects in `allowed_subjects`.
+Email matches and remote administrator claims never create a desktop owner.
+
+The approved deployment binding is the owner's existing **Aaron Beavers** human
+actor. The separate system administrator and any other valid Axxium account are
+not granted this shared desktop. Actor IDs and private client credentials are
+configured explicitly, not generated from a display name or an email address.
+
+The login page offers **Sign in with Axxium**. The flow uses confidential-client
+authorization code exchange with PKCE S256, browser-bound one-use state, a nonce,
+RS256 signed-token verification, exact issuer/audience checks and current
+client-scoped token introspection. Discovery endpoints must remain on the exact
+configured authority origin; metadata cannot redirect client credentials to a
+different service. Identity and access tokens remain in server memory, with an
+opaque Secure/HttpOnly/SameSite=Lax browser cookie. Restarting the adapter requires
+a new sign-in. Identity/access tokens never enter browser URLs or local storage;
+the callback's short-lived authorization code is redeemed on the server.
+
+Authenticated HTTP requests recheck the current grant without a positive cache.
+Long-lived HTTP streams and WebSockets recheck at ten-second intervals, with a
+five-second authority timeout. Expiration, revocation or an unavailable authority
+ends the protected connection; it does not replay or cancel already accepted
+native worker tasks. Logout removes the local desktop session and revokes the
+access token. An unconfirmed authority revocation is reported separately from a
+successful local sign-out. There is no global logout of unrelated product sessions.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /auth/axxium/start` | Begin the registered shared sign-in |
+| `GET /auth/axxium/callback` | Exact registered browser callback |
+| `POST /auth/axxium/logout` | Same-origin local logout and grant revocation |
+| `GET /auth/axxium/status` | Content-free issuer configuration/availability |
+
+At verification time on **2026-10-23**, the public issuer discovery returned 404,
+the live authority's private OIDC config was absent, and Orbit's sign-in start
+correctly returned 503. No real Axxium sign-in or client registration is claimed.
+The live login entry is prepared; the central shared issuer must be activated
+through its existing reviewed Axxium/Services lane before it can authenticate.
+This integration does not deploy another identity authority or change the PDS's
+discovery routes.
+
+Private registration input is retained at
+`.runtime/constellation/axxium-client-registration.json` on Stealth. It contains
+the exact `orbit-desktop` client secret and callback
+`https://orbit.promethean.rest/auth/axxium/callback` for the existing authority's
+closed client schema. It is an additive client entry, **not** a replacement
+authority config. Preserve existing clients, signing keys, cookie keys, storage
+and active accounts during upstream activation. No credential appears in Git,
+reports or the public status response.
+
+`allow_owner_token` is an explicit migration switch. The current development
+deployment leaves its original owner access under a separate disclosure while
+the shared issuer is unavailable. Selecting Axxium never silently switches to
+token authentication after a failed exchange. A successful Axxium callback clears
+the legacy cookie. After live sign-in and revocation verification, set this switch
+to `false` and restart only the shared gateway; all legacy owner cookies and
+owner-token POSTs are then refused. Machine MCP credentials retain their finite
+tool-only scope and do not unlock a browser session.
+
+Run the protocol suite and the content-free live-entry probe:
+
+```sh
+node --test integrations/constellation/test-axxium-auth.mjs
+node integrations/constellation/verify-axxium-login.mjs
+```
+
+The protocol suite uses the maintained library with actual RSA-signed fixture
+tokens. It covers PKCE, nonce/state binding, one-use callbacks, expiration,
+unapproved subjects, wrong signatures/issuers/audiences, current grants, endpoint
+confinement, revocation, outages and logout. It does not substitute fixture success
+for an authenticated human sign-in at the live issuer.
 
 ## Current deployment (observed 2026-10-23)
 
@@ -144,9 +223,11 @@ This is a directly activated development desktop route, not a production-qualifi
 release. Review and adoption into the canonical Services controller remain separate.
 
 Access [the desktop](https://orbit.promethean.rest/) or
-[the dashboard](https://orbit.promethean.rest/constellation/) using the existing
-Orbit owner token. It is read from the private runtime `session-token` file;
-no credential is included in documentation, screenshots or committed config.
+[the dashboard](https://orbit.promethean.rest/constellation/) through the shared
+login page. Axxium is the intended sign-in; while issuer activation is pending,
+the existing Orbit owner token remains under the development-access disclosure.
+It is read from the private runtime `session-token` file; no credential is
+included in documentation, screenshots or committed config.
 
 ## Verification and recovery
 
@@ -163,6 +244,9 @@ renders the actual dashboard iframe and performs real host probes and memory
 search. It checks owner login, denied anonymous APIs, foreign origins, controller
 token confinement, shared identity, revision acknowledgement and mobile overflow.
 It never invokes a model or treats the owner's workspace as a test fixture.
+This journey checks the explicit legacy migration configuration; the Axxium
+protocol suite and live-entry probe are separate, and live human sign-in is
+still unverified while the issuer is unavailable.
 `ORBIT_TEST_BROWSER`, `ORBIT_TEST_SCRATCH` and `ORBIT_TEST_SCREENSHOT` can select
 the browser, private test directory and screenshot location.
 

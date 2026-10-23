@@ -21,6 +21,7 @@ const scratch = fs.mkdtempSync(
 );
 const cfg = {
   ...original,
+  axxium: undefined, // This journey preserves the explicit legacy migration path.
   gateway_port: 14321,
   port: 14320,
   workspace_id: crypto.randomUUID(),
