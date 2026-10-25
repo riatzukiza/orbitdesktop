@@ -139,8 +139,9 @@ def probe(cfg):
         if name == 'opencode' and sessions['ok']:
             rows = sessions['data']
             if not isinstance(rows, list):
-                raise ValueError('Unexpected OpenCode session response')
-            sessions['data'] = [{k:r[k] for k in ('id','title','directory','time','parentID') if k in r} for r in rows[:20]]
+                sessions = {'ok': False, 'observed_at': sessions['observed_at'], 'error': 'Unexpected OpenCode session response'}
+            else:
+                sessions['data'] = [{k:r[k] for k in ('id','title','directory','time','parentID') if k in r} for r in rows[:20] if isinstance(r, dict)]
         harnesses.append({'id':name, 'installed':bool(executable(name)),
                           'process_count':sum(1 for p in processes if p.strip()==name),
                           'sessions':sessions})

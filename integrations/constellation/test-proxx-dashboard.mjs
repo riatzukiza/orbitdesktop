@@ -15,7 +15,7 @@ let budgets = { ok: true, data: { budgets: [{ scopeId: 'bot', status: 'ok', dail
 const snapshot = () => ({ hosts: {}, links: {}, openplanner: {ok:false}, observed_at: new Date().toISOString(),
   proxx: {ok:true, data: {configured:true,label:'Fixture ledger',observed_at:new Date().toISOString(),budgets,
     usage:{ok:true,data:{entries:[{providerId:'requesty',model:'gemma4:31b',upstreamModel:'google/gemma-4-31b-it',
-      status:200,costUsd:0,ttftMs:100,tps:38}]}}}} });
+      status:200,costUsd:0,ttftMs:100,tps:38},{status:200}]}}}} });
 const server = createServer(async (req,res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) {
@@ -39,6 +39,8 @@ try {
   assert.match(await page.locator('#proxx-budgets').textContent(),/Carried holds: \$0.050/);
   assert.match(await page.locator('#proxx-routes').textContent(),/google\/gemma-4-31b-it/);
   assert.match(await page.locator('#proxx-routes').textContent(),/\$0.0000/);
+  assert.match(await page.locator('#proxx-routes').textContent(),/Unknown provider/);
+  assert.doesNotMatch(await page.locator('#proxx-routes').textContent(),/undefined|Unknown ms/);
   budgets={ok:false,error:'unavailable'};
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.locator('#proxx-budgets').getByText(/remaining allowance is unknown/).waitFor();

@@ -127,7 +127,7 @@ function renderProxx(result) {
   const entries = data.usage.data.entries || [];
   const groups = new Map();
   for (const entry of entries) {
-    const key = entry.providerId + " / " + (entry.upstreamModel || "Unknown upstream (requested " + entry.model + ")");
+    const key = (entry.providerId || "Unknown provider") + " / " + (entry.upstreamModel || "Unknown upstream (requested " + (entry.model || "unknown model") + ")");
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(entry);
   }
@@ -144,7 +144,8 @@ function renderProxx(result) {
     const costs = rows.map(r => r.costUsd).filter(Number.isFinite);
     const cost = costs.length ? "$" + costs.reduce((a,b) => a+b,0).toFixed(4) + (costs.length < rows.length ? " + unknown" : "") : "Unknown";
     const tr = el("tr");
-    for (const value of [route, rows.length, success.length, cost, mean("ttftMs") + " ms", mean("tps")]) tr.append(el("td", value));
+    const ttft = mean("ttftMs");
+    for (const value of [route, rows.length, success.length, cost, ttft === "Unknown" ? ttft : ttft + " ms", mean("tps")]) tr.append(el("td", value));
     table.append(tr);
   }
   $("proxx-routes").append(el("p", entries.length + " recent attempts. This sample is not the monthly invoice or proof that a specific agent made every request.", "muted"), table);

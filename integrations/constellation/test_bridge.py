@@ -89,4 +89,17 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(result['budgets']['ok'])
         self.assertNotIn('secret', json.dumps(result))
 
+    def test_bad_opencode_response_preserves_other_host_evidence(self):
+        self.cfg['opencode'] = {'url': 'http://127.0.0.1:12345'}
+        with patch.object(bridge, 'fetch', return_value={'unexpected': 'shape'}), \
+             patch.object(bridge, 'codex_sessions', return_value=[]), \
+             patch.object(bridge, 'claude_sessions', return_value=[]):
+            result = bridge.probe(self.cfg)
+        self.assertIn('load', result)
+        self.assertIn('memory', result)
+        harnesses = {h['id']: h for h in result['harnesses']}
+        self.assertTrue(harnesses['codex']['sessions']['ok'])
+        self.assertTrue(harnesses['claude']['sessions']['ok'])
+        self.assertFalse(harnesses['opencode']['sessions']['ok'])
+
 if __name__=='__main__':unittest.main()
