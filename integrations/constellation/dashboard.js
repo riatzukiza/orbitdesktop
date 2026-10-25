@@ -11,7 +11,7 @@ const el = (tag, text, cls) => {
   if (cls) node.className = cls;
   return node;
 };
-async function api(path, body) {
+async function api(path, body, { array = false } = {}) {
   const response = await fetch("api/" + path, {
     method: body ? "POST" : "GET",
     headers: {
@@ -30,7 +30,7 @@ async function api(path, body) {
   }
   if (!response.ok)
     throw Error(`HTTP ${response.status}: ${value?.error || text.slice(0, 300) || "Request failed"}`);
-  if (!value || typeof value !== "object" || Array.isArray(value))
+  if (!value || typeof value !== "object" || Array.isArray(value) !== array)
     throw Error(`HTTP ${response.status}: invalid JSON response`);
   $("unlock").hidden = true;
   return value;
@@ -343,6 +343,8 @@ async function refreshJobs() {
   try {
     const list = await api(
       "jobs?host=" + encodeURIComponent($("target").value || "stealth"),
+      undefined,
+      { array: true },
     );
     $("jobs").replaceChildren();
     for (const job of list) {

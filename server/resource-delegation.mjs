@@ -285,7 +285,7 @@ export async function createResourceDelegation({root,workspaceRead,knowledge,doc
     try{
       if(req.method!=='POST'||req.url!=='/tool')fail('permission_denied');
       const id=req.headers['x-orbit-recipient'];entry=active.get(id);if(!entry)fail('permission_denied');
-      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>150000)fail('limit_exceeded');chunks.push(chunk);}const raw=Buffer.concat(chunks);
+      const chunks=[];let size=0;for await(const chunk of req.iterator({destroyOnReturn:false})){size+=chunk.length;if(size>150000)fail('limit_exceeded');chunks.push(chunk);}const raw=Buffer.concat(chunks);
       const seq=req.headers['x-orbit-sequence'],mac=req.headers['x-orbit-mac'];
       if(!/^[1-9][0-9]{0,9}$/.test(seq??'')||Number(seq)<=entry.sequence||!/^[a-f0-9]{64}$/.test(mac??''))fail('permission_denied');
       const expected=createHmac('sha256',entry.secret).update(`${seq}\n`).update(raw).digest();
@@ -294,6 +294,9 @@ export async function createResourceDelegation({root,workspaceRead,knowledge,doc
       try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));}catch{fail('invalid_request');}
       const result=await tool(id,body);res.end(JSON.stringify(result));
     }catch(error){
+      // Keep an oversized request from destroying the refusal response on Node 22.
+      // Drain without retaining bytes; close the connection after the response.
+      if(!req.complete){req.resume();res.setHeader('Connection','close');}
       if(owned&&error.channel_retirement==='completed')try{retire(req.headers['x-orbit-recipient'],'completed');}catch{/* Retain the slot/receipt on cleanup IO failure. */}
       const code=codes.has(error.code)?error.code:'unavailable';let outcome='refused';
       if(owned&&['create_document','revise_document'].includes(body?.action)&&uuid.test(body.op_id??'')&&!['operation_mismatch','invalid_request','permission_denied','limit_exceeded'].includes(code)){

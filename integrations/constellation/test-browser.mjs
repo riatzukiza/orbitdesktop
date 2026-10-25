@@ -88,7 +88,7 @@ try {
   });
   const page = await context.newPage();
   const errors = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(e.stack || e.message));
   await page.goto(base + "/login");
   await page
     .getByLabel("Orbit owner token")
@@ -166,10 +166,43 @@ try {
   assert.ok(
     (await control({ action: "read" })).observed_revision >= selected.revision,
   );
+  // Exercise the dashboard's own links from the real sandboxed pane.
+  // Intercept the chosen destination so no external application is contacted.
+  const sandbox = await page.locator("iframe").last().getAttribute("sandbox");
+  assert.ok(sandbox.split(/\s+/).includes("allow-popups"));
+  assert.ok(sandbox.split(/\s+/).includes("allow-top-navigation-by-user-activation"));
+  const surfaceLink = frame.locator('a[target="_blank"]').first();
+  const surfaceUrl = await surfaceLink.getAttribute("href");
+  assert.ok(surfaceUrl);
+  await context.route(surfaceUrl, route => route.fulfill({
+    status: 200, contentType: "text/html", body: "<h1>Surface link fixture</h1>",
+  }));
+  const opened = context.waitForEvent("page", {timeout: 10000});
+  await surfaceLink.click();
+  const popup = await opened;
+  await popup.waitForURL(surfaceUrl);
+  await popup.getByRole("heading", {name: "Surface link fixture"}).waitFor();
+  await popup.close();
+  await context.unroute(surfaceUrl);
+  await frame.locator("a.brand").click();
+  await page.waitForURL(base + "/");
+  const jobsPattern = "**/constellation/api/jobs?*";
+  await context.route(jobsPattern, route => route.fulfill({
+    status: 200, contentType: "application/json",
+    body: JSON.stringify([{harness:"fixture",host:"browser-only",project:"no-worker-started",state:"complete",id:"array-response-fixture"}]),
+  }));
   await page.goto(base + "/constellation/");
   await page.locator("#hosts .host").first().waitFor({ timeout: 35000 });
   assert.equal(await page.locator("#hosts .host").count(), 3);
   assert.ok((await page.locator("#sessions .session").count()) > 0);
+  await page.locator("#jobs .job").filter({hasText:"array-response-fixture"}).waitFor();
+  assert.ok(!(await page.locator("#dispatch-status").textContent()).includes("invalid JSON"));
+  await context.unroute(jobsPattern);
+  await page.reload();
+  await page.locator("#hosts .host").first().waitFor({timeout:35000});
+  await page.waitForFunction(() => !document.querySelector("#refresh").disabled);
+  assert.ok(!(await page.locator("#dispatch-status").textContent()).includes("invalid JSON"));
+
   await page.getByLabel("Find a context, idea, or memory").fill("orbit");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.waitForFunction(
@@ -180,6 +213,13 @@ try {
     (await page.locator("#results .result").count()) > 0,
     "OpenPlanner must return actual result rows, not merely an error message",
   );
+  if (original.model_evaluation_file) {
+    const report = JSON.parse(fs.readFileSync(original.model_evaluation_file, "utf8"));
+    assert.equal(await page.locator("#evaluation-results tr").count(), report.summary.length + 1);
+    const provenance = await page.locator("#evaluation-evidence").textContent();
+    assert.ok(provenance.includes(report.sampleCount + " samples"));
+    assert.ok(provenance.includes(report.sourceSha256));
+  }
   const screenshot =
     process.env.ORBIT_TEST_SCREENSHOT || path.join(scratch, "dashboard.png");
   await page.screenshot({ path: screenshot, fullPage: true });
@@ -204,10 +244,13 @@ try {
         "MCP token cannot unlock owner API",
         "shared workspace bootstrap",
         "real iframe rendering",
+        "embedded surface link opens an isolated new tab",
+        "embedded brand link returns the top-level page to Orbit",
         "browser revision acknowledgement in isolated workspace",
         "three live host cards",
         "recorded contexts",
         "OpenPlanner search",
+        "jobs array response renders without an invalid-JSON error",
         "mobile layout",
       ],
       screenshot,

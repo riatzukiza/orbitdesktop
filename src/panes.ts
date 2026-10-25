@@ -443,7 +443,7 @@ export function createPane(p: Pane, font: number, a: PaneActions): PaneView {
         frame.referrerPolicy = "no-referrer";
         frame.setAttribute(
           "sandbox",
-          localApp ? "allow-scripts allow-forms allow-modals allow-downloads" : constellation ? "allow-scripts allow-forms allow-same-origin" : "allow-scripts allow-forms allow-same-origin allow-popups",
+          localApp ? "allow-scripts allow-forms allow-modals allow-downloads" : constellation ? "allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" : "allow-scripts allow-forms allow-same-origin allow-popups",
         );
         frame.src = current;
         surface.replaceChildren(frame);
