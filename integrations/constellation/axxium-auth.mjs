@@ -98,7 +98,8 @@ export function createAxxiumAuth({
   if (!cfg) return null;
   const callback = origin + AUTH_PATHS.callback;
   // Anonymous starts allocate no server-side pending state. Short-lived
-  // consumed callback digests preserve one-use, including failed attempts.
+  // approved callback digests preserve local replay rejection. Failed token
+  // exchanges rely on issuer-enforced single-use codes (OAuth2 RFC6749§4.1.2).
   const transactions = new Map(), sessions = new Map(), inFlight = new Set();
   const transactionKey = crypto.randomBytes(32);
   const transactionAad = Buffer.from(origin + "|" + cfg.issuer + "|" + cfg.client_id);
@@ -248,16 +249,12 @@ export function createAxxiumAuth({
     prune();
     const states = url.searchParams.getAll("state");
     if (states.length !== 1) throw denied();
-    // Validate server-issued state before retaining any callback digest. Random
-    // unauthenticated URL values cannot allocate this bounded replay cache.
+    // Authenticate state and browser binding before exchanging the code. Neither
+    // server-issued state nor its cookie proves an authenticated owner identity.
     const issued = openTransaction(states[0]);
     if (issued.kind !== "state" || typeof issued.id !== "string"
         || !Number.isFinite(issued.expiresAt) || issued.expiresAt <= clock()
         || transactions.has(states[0])) throw denied();
-    if (transactions.size >= 10000)
-      throw Object.assign(new Error("Sign-in callback capacity reached; try again shortly."), {status: 429});
-    // Consume before browser/token checks, including malformed/failed attempts.
-    transactions.set(states[0], {expiresAt: issued.expiresAt});
     const transaction = openTransaction(cookieValue(req.headers.cookie, transactionCookie));
     if (transaction.kind !== "transaction" || transaction.state !== states[0] || typeof transaction.nonce !== "string"
         || typeof transaction.verifier !== "string" || !Number.isFinite(transaction.expiresAt)
@@ -308,6 +305,12 @@ export function createAxxiumAuth({
     };
     if (!(await current(session))) throw denied();
     prune();
+    // Only a signed, linked and currently authorized owner can allocate durable
+    // replay state. Anonymous starts, browser failures, bad codes and rejected
+    // tokens cannot deny later owner sign-ins by filling this shared cache.
+    if (transactions.size >= 10000)
+      throw Object.assign(new Error("Sign-in callback capacity reached; try again shortly."), {status: 429});
+    transactions.set(transaction.state, {expiresAt: transaction.expiresAt});
     if (sessions.size >= 10000)
       throw Object.assign(new Error("Desktop session capacity reached."), {
         status: 503,

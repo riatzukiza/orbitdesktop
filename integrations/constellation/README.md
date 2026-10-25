@@ -137,7 +137,7 @@ not granted this shared desktop. Actor IDs and private client credentials are
 configured explicitly, not generated from a display name or an email address.
 
 The login page offers **Sign in with Axxium**. The flow uses confidential-client
-authorization code exchange with PKCE S256, browser-bound one-use state, a nonce,
+authorization code exchange with PKCE S256, browser-bound state, local replay rejection after successful login, a nonce,
 RS256 signed-token verification, exact issuer/audience checks and current
 client-scoped token introspection. Discovery endpoints must remain on the exact
 configured authority origin; metadata cannot redirect client credentials to a
@@ -302,10 +302,19 @@ separate receipts.
 Pending Axxium sign-in state is sealed with AES-256-GCM in a Secure/HttpOnly
 transaction cookie, bound to the desktop origin, issuer and confidential client.
 Anonymous start requests allocate no pending-state map entry. The process retains
-only short-lived consumed callback digests and concurrent exchanges; Axxium
+only short-lived approved callback digests and concurrent exchanges; Axxium
 remains the authorization-code/PKCE authority. Tampering, expiration, another
 adapter process, concurrent duplicate callbacks and replay after success are
-refused. Failed callbacks consume their server-issued state too; arbitrary URL state values cannot allocate the bounded replay cache. A process restart invalidates pending sign-ins. Unsuccessful exchanges
+refused. The replay cache admits a state only after signed ID-token validation,
+explicit linked-subject authorization and current token introspection succeed.
+Neither missing browser cookies nor invalid codes can fill this shared cache.
+An unbound callback cannot consume a legitimate browser transaction. For rejected
+token exchanges, the issuer remains responsible for single-use authorization
+codes ([OAuth2 RFC6749 section4.1.2](https://www.rfc-editor.org/rfc/rfc6749.html#section-4.1.2));
+the local cache does not pretend that an anonymous failure proves owner identity.
+The protocol fixture enforces code single-use and verifies that a rejected
+signed-token response cannot redeem the same code later. A process restart
+invalidates pending sign-ins. Unsuccessful exchanges
 never create a desktop session; authority availability remains a separate live
 precondition. The protocol fixture proves these boundaries without real accounts.
 

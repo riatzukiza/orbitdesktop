@@ -67,7 +67,9 @@ function fixture(overrides = {}) {
     assert.equal(form.get("client_id"), config.client_id);
     assert.equal(form.get("client_secret"), secret);
     if (url.pathname === "/oidc/token") {
-      assert.equal(form.get("code"), "fixture-code");
+      if (form.get("code") !== "fixture-code" || state.code.used)
+        return new Response(JSON.stringify({error:"invalid_grant"}),{status:400,headers:{"content-type":"application/json"}});
+      state.code.used = true;
       assert.equal(form.get("redirect_uri"), origin + AUTH_PATHS.callback);
       const challenge = await import("openid-client").then((c) =>
         c.calculatePKCECodeChallenge(form.get("code_verifier")),
@@ -184,14 +186,14 @@ test("real OIDC library verifies signed ID token, nonce, state and PKCE, then re
   assert.equal(f.state.introspections, 3, "No positive session-status cache");
   assert.equal(f.auth.allowOwnerToken, false);
 });
-test("callback is browser bound and one-use even after failed redemption", async () => {
+test("an unbound callback cannot consume the legitimate browser transaction", async () => {
   const f = fixture(),
     start = await f.begin();
   await assert.rejects(
     f.auth.complete({ headers: { cookie: "" } }, start.url),
     { status: 401 },
   );
-  await assert.rejects(f.auth.complete(start.req, start.url), { status: 401 });
+  await f.auth.complete(start.req, start.url);
 });
 test("a successful callback cannot be replayed", async () => {
   const f = fixture(),
@@ -316,4 +318,32 @@ test("arbitrary callback state cannot allocate replay capacity", async () => {
     await assert.rejects(f.auth.complete({headers:{cookie:''}},new URL(origin+AUTH_PATHS.callback+'?code=bad&state=random-'+i)));
   }
   assert.equal((await f.auth.authenticate(await f.login())).subject,owner);
+});
+
+
+test("server-issued states without browser cookies cannot exhaust callback capacity", async () => {
+  const f = fixture();
+  for (let i=0; i<10005; i++) {
+    const started = await f.auth.start();
+    const state = new URL(started.location).searchParams.get('state');
+    await assert.rejects(f.auth.complete({headers:{cookie:''}}, new URL(origin+AUTH_PATHS.callback+'?code=bad&state='+state)), {status:401});
+  }
+  assert.equal((await f.auth.authenticate(await f.login())).subject, owner);
+});
+
+test("browser-bound invalid authorization codes cannot exhaust callback capacity", async () => {
+  const f = fixture();
+  for (let i=0; i<10005; i++) {
+    const started=await f.begin(); started.url.searchParams.set('code','invalid-code');
+    await assert.rejects(f.auth.complete(started.req,started.url),{status:401});
+  }
+  assert.equal((await f.auth.authenticate(await f.login())).subject,owner);
+});
+
+
+test("a code consumed by a rejected signed-token response cannot be redeemed twice", async () => {
+  const f=fixture(), start=await f.begin(); f.state.wrongNonce=true;
+  await assert.rejects(f.auth.complete(start.req,start.url),{status:401});
+  f.state.wrongNonce=false;
+  await assert.rejects(f.auth.complete(start.req,start.url),{status:401});
 });
