@@ -29,7 +29,11 @@ async function session(): Promise<SharedOrbitSession | null> {
   localStorage.setItem("orbit.workspace.id", value.workspace_id);
   return { workspace_id: value.workspace_id, token: value.token };
 }
-export const sharedOrbitSession = await session();
+export const sharedOrbitSession = await session().catch(() => {
+  // Keep the desktop available while withholding the trusted shared binding.
+  console.warn("Shared Orbit owner session unavailable; unlock the desktop again.");
+  return null;
+});
 
 // Reviewed host integration only. No generated app or arbitrary same-origin
 // page gains an iframe exception from the presence of the shared gateway.

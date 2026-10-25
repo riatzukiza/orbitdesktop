@@ -17,9 +17,13 @@ const snapshot = () => ({ hosts: {}, links: {}, openplanner: {ok:false}, observe
   proxx: {ok:true, data: {configured:true,label:'Fixture ledger',observed_at:new Date().toISOString(),budgets,
     usage:{ok:true,data:{entries:[{providerId:'requesty',model:'gemma4:31b',upstreamModel:'google/gemma-4-31b-it',
       status:200,costUsd:0,ttftMs:100,tps:38},{status:200}]}}}} });
+let snapshotFailure = null;
 const server = createServer(async (req,res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) {
+    if (url.pathname === '/api/snapshot' && snapshotFailure) {
+      res.writeHead(snapshotFailure.status, {'content-type':'text/plain'}).end(snapshotFailure.body); return;
+    }
     res.setHeader('content-type','application/json');
     res.end(JSON.stringify(url.pathname === '/api/snapshot' ? snapshot() : url.pathname === '/api/jobs' ? [] : {projects:[],harnesses:[]})); return;
   }
@@ -50,6 +54,16 @@ try {
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.locator('#proxx-budgets').getByText(/remaining allowance is unknown/).waitFor();
   assert.doesNotMatch(await page.locator('#proxx-budgets').textContent(),/\$0\.000/);
+  snapshotFailure={status:502,body:'upstream gateway unavailable'};
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.getByText('HTTP 502: upstream gateway unavailable',{exact:true}).waitFor();
+  snapshotFailure={status:401,body:'sign in required'};
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.locator('#unlock').waitFor({state:'visible'});
+  await page.getByText('Unlock the dashboard to load private fleet data.',{exact:true}).waitFor();
+  snapshotFailure={status:200,body:'not JSON'};
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.getByText('HTTP 200: invalid JSON response',{exact:true}).waitFor();
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]);

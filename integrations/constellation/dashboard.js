@@ -21,12 +21,17 @@ async function api(path, body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
     cache: "no-store",
   });
-  const value = await response.json();
+  const text = await response.text();
+  let value;
+  try { value = JSON.parse(text); } catch { /* Preserve HTTP failures below. */ }
   if (response.status === 401) {
     $("unlock").hidden = false;
     throw Error("Unlock the dashboard to load private fleet data.");
   }
-  if (!response.ok) throw Error(value.error || "Request failed");
+  if (!response.ok)
+    throw Error(`HTTP ${response.status}: ${value?.error || text.slice(0, 300) || "Request failed"}`);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw Error(`HTTP ${response.status}: invalid JSON response`);
   $("unlock").hidden = true;
   return value;
 }
