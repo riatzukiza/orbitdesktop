@@ -184,12 +184,15 @@ try {
     process.env.ORBIT_TEST_SCREENSHOT || path.join(scratch, "dashboard.png");
   await page.screenshot({ path: screenshot, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-    true,
-  );
+  const mobile = await page.evaluate(() => ({
+    fits: document.documentElement.scrollWidth <= innerWidth,
+    width: innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    overflow: [...document.querySelectorAll("body *")]
+      .filter(node => node.getBoundingClientRect().right > innerWidth + 1)
+      .slice(0, 12).map(node => ({tag:node.tagName,id:node.id,className:node.className,right:node.getBoundingClientRect().right})),
+  }));
+  assert.equal(mobile.fits, true, JSON.stringify(mobile));
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({

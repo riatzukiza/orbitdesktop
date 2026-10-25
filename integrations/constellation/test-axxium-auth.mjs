@@ -309,3 +309,11 @@ test("a process-local transaction cannot be redeemed by another adapter instance
   const first=fixture(), second=fixture(), start=await first.begin();
   await assert.rejects(second.auth.complete(start.req,start.url));
 });
+
+test("arbitrary callback state cannot allocate replay capacity", async () => {
+  const f=fixture();
+  for(let i=0;i<10005;i++) {
+    await assert.rejects(f.auth.complete({headers:{cookie:''}},new URL(origin+AUTH_PATHS.callback+'?code=bad&state=random-'+i)));
+  }
+  assert.equal((await f.auth.authenticate(await f.login())).subject,owner);
+});

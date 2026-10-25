@@ -123,6 +123,7 @@ h1 span {
 }
 .host,
 .panel {
+  min-width: 0;
   border: 1px solid #29343e;
   border-radius: 12px;
   background: #111922;
@@ -442,7 +443,7 @@ footer {
     grid-template-columns: 1fr;
   }
   .columns {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .dispatch-fields {
     grid-template-columns: 1fr;

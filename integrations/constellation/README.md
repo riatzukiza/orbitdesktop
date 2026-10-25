@@ -302,9 +302,9 @@ separate receipts.
 Pending Axxium sign-in state is sealed with AES-256-GCM in a Secure/HttpOnly
 transaction cookie, bound to the desktop origin, issuer and confidential client.
 Anonymous start requests allocate no pending-state map entry. The process retains
-only short-lived successful-redemption digests and concurrent exchanges; Axxium
+only short-lived consumed callback digests and concurrent exchanges; Axxium
 remains the authorization-code/PKCE authority. Tampering, expiration, another
 adapter process, concurrent duplicate callbacks and replay after success are
-refused. A process restart invalidates pending sign-ins. Unsuccessful exchanges
+refused. Failed callbacks consume their server-issued state too; arbitrary URL state values cannot allocate the bounded replay cache. A process restart invalidates pending sign-ins. Unsuccessful exchanges
 never create a desktop session; authority availability remains a separate live
 precondition. The protocol fixture proves these boundaries without real accounts.

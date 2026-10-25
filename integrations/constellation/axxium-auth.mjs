@@ -97,8 +97,8 @@ export function createAxxiumAuth({
   const cfg = validateAxxiumConfiguration(config, origin);
   if (!cfg) return null;
   const callback = origin + AUTH_PATHS.callback;
-  // Anonymous starts allocate no server-side pending state. Only successful
-  // redemptions are retained; PKCE/code one-use remains enforced by Axxium.
+  // Anonymous starts allocate no server-side pending state. Short-lived
+  // consumed callback digests preserve one-use, including failed attempts.
   const transactions = new Map(), sessions = new Map(), inFlight = new Set();
   const transactionKey = crypto.randomBytes(32);
   const transactionAad = Buffer.from(origin + "|" + cfg.issuer + "|" + cfg.client_id);
@@ -227,7 +227,7 @@ export function createAxxiumAuth({
     prune();
     const rp = await client();
     const verifier = oidc.randomPKCECodeVerifier(),
-      state = oidc.randomState(),
+      state = sealTransaction({kind: "state", id: random(), expiresAt: clock() + 300000}),
       nonce = oidc.randomNonce();
     const url = oidc.buildAuthorizationUrl(rp, {
       redirect_uri: callback,
@@ -238,7 +238,7 @@ export function createAxxiumAuth({
       code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
       code_challenge_method: "S256",
     });
-    const binding = sealTransaction({state, nonce, verifier, expiresAt: clock() + 300000});
+    const binding = sealTransaction({kind: "transaction", state, nonce, verifier, expiresAt: clock() + 300000});
     return {
       location: url.href,
       cookies: [cookie(transactionCookie, binding, 300)],
@@ -248,10 +248,20 @@ export function createAxxiumAuth({
     prune();
     const states = url.searchParams.getAll("state");
     if (states.length !== 1) throw denied();
+    // Validate server-issued state before retaining any callback digest. Random
+    // unauthenticated URL values cannot allocate this bounded replay cache.
+    const issued = openTransaction(states[0]);
+    if (issued.kind !== "state" || typeof issued.id !== "string"
+        || !Number.isFinite(issued.expiresAt) || issued.expiresAt <= clock()
+        || transactions.has(states[0])) throw denied();
+    if (transactions.size >= 10000)
+      throw Object.assign(new Error("Sign-in callback capacity reached; try again shortly."), {status: 429});
+    // Consume before browser/token checks, including malformed/failed attempts.
+    transactions.set(states[0], {expiresAt: issued.expiresAt});
     const transaction = openTransaction(cookieValue(req.headers.cookie, transactionCookie));
-    if (transaction.state !== states[0] || typeof transaction.nonce !== "string"
+    if (transaction.kind !== "transaction" || transaction.state !== states[0] || typeof transaction.nonce !== "string"
         || typeof transaction.verifier !== "string" || !Number.isFinite(transaction.expiresAt)
-        || transaction.expiresAt <= clock() || transactions.has(states[0]) || inFlight.has(states[0]))
+        || transaction.expiresAt <= clock() || inFlight.has(states[0]))
       throw denied();
     // Bound only simultaneous token exchanges, not five minutes of anonymous
     // starts. An unsuccessful exchange cannot create a desktop session.
@@ -260,7 +270,6 @@ export function createAxxiumAuth({
     inFlight.add(states[0]);
     try {
       const result = await redeem(transaction, url);
-      transactions.set(states[0], {expiresAt: transaction.expiresAt});
       return result;
     } finally { inFlight.delete(states[0]); }
   }
@@ -299,7 +308,7 @@ export function createAxxiumAuth({
     };
     if (!(await current(session))) throw denied();
     prune();
-    if (sessions.size >= 10000 || transactions.size >= 10000)
+    if (sessions.size >= 10000)
       throw Object.assign(new Error("Desktop session capacity reached."), {
         status: 503,
       });
