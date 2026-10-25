@@ -94,8 +94,64 @@ function renderSessions() {
       el("p", "No matching recorded contexts were returned.", "muted"),
     );
 }
+const dollars = (micro) => Number.isFinite(micro) ? "$" + (micro / 1e6).toFixed(3) : "Unknown";
+function renderProxx(result) {
+  const data = result?.ok ? result.data : undefined;
+  $("proxx-status").textContent = data?.configured ? "Configured source" : "Unavailable";
+  $("proxx-description").textContent = data?.configured
+    ? data.label + " · observed " + data.observed_at + ". Runtime activation and model evaluation require separate evidence."
+    : "No Proxx observation available. Missing data does not mean zero spending.";
+  $("proxx-budgets").replaceChildren();
+  $("proxx-routes").replaceChildren();
+  if (!data?.configured) return;
+  if (data.budgets?.ok) {
+    for (const budget of data.budgets.data.budgets || []) {
+      const card = el("article", undefined, "session");
+      const text = el("div");
+      text.append(el("h3", budget.scopeId));
+      if (budget.status === "ok") {
+        const u = budget.usage;
+        text.append(el("p", "Today: " + dollars(budget.dailyRemainingMicrousd) + " remaining of " + dollars(budget.dailyMicrousd)
+          + " · Month: " + dollars(budget.monthlyRemainingMicrousd) + " remaining of " + dollars(budget.monthlyMicrousd)));
+        text.append(el("p", "Confirmed: " + dollars(u.dailyChargedMicrousd) + " today / " + dollars(u.monthlyChargedMicrousd)
+          + " this month · Held: " + dollars(u.heldMicrousd) + " (" + u.unresolvedCount + " unresolved)"));
+        text.append(el("p", "Carried holds: " + dollars(u.dailyCarriedMicrousd) + " from prior days / " + dollars(u.monthlyCarriedMicrousd) + " from prior months", "muted"));
+      } else text.append(el("p", "Ledger unavailable; remaining allowance is unknown.", "muted"));
+      text.append(el("p", "Allowed routes: " + (budget.routes || []).map(r => r.upstreamModel + " [" + r.billing + "]").join(" · "), "muted"));
+      card.append(text); $("proxx-budgets").append(card);
+    }
+  } else $("proxx-budgets").append(el("p", "Budget API unavailable; remaining allowance is unknown.", "muted"));
+  if (!data.usage?.ok) {
+    $("proxx-routes").append(el("p", "Recent route evidence unavailable.", "muted")); return;
+  }
+  const entries = data.usage.data.entries || [];
+  const groups = new Map();
+  for (const entry of entries) {
+    const key = entry.providerId + " / " + (entry.upstreamModel || "Unknown upstream (requested " + entry.model + ")");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  const table = el("table"), head = el("tr");
+  for (const label of ["Actual route", "Attempts", "Successes", "Recorded cost", "Mean TTFT", "Mean decode TPS"])
+    head.append(el("th", label));
+  table.append(head);
+  for (const [route, rows] of groups) {
+    const success = rows.filter(r => r.status >= 200 && r.status < 300);
+    const mean = field => {
+      const values = success.map(r => r[field]).filter(Number.isFinite);
+      return values.length ? (values.reduce((a,b) => a+b,0) / values.length).toFixed(1) : "Unknown";
+    };
+    const costs = rows.map(r => r.costUsd).filter(Number.isFinite);
+    const cost = costs.length ? "$" + costs.reduce((a,b) => a+b,0).toFixed(4) + (costs.length < rows.length ? " + unknown" : "") : "Unknown";
+    const tr = el("tr");
+    for (const value of [route, rows.length, success.length, cost, mean("ttftMs") + " ms", mean("tps")]) tr.append(el("td", value));
+    table.append(tr);
+  }
+  $("proxx-routes").append(el("p", entries.length + " recent attempts. This sample is not the monthly invoice or proof that a specific agent made every request.", "muted"), table);
+}
 function render(snapshot) {
   current = snapshot;
+  renderProxx(snapshot.proxx);
   $("hosts").replaceChildren();
   for (const [name, result] of Object.entries(snapshot.hosts)) {
     const card = el("article", undefined, "host"),

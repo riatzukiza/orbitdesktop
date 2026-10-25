@@ -271,3 +271,30 @@ optional frontend bootstrap **is** included and archive parity must be checked
 after changing included source. Full-repository installation supplies this adapter.
 
 SPDX-License-Identifier: GPL-3.0-or-later
+
+
+## Proxx bot allowance and route observations
+
+The existing dashboard can read an explicitly configured Proxx service. Add an
+optional `proxx` object to the private 0600 constellation config with `url`,
+`label` and `token`. Use a server-issued bot tenant key to restrict the view to
+that key's budget and usage; an administrative token sees its administrative
+scope. Only HTTPS or loopback HTTP is accepted. Redirects are refused. Tokens
+stay in the trusted adapter and are never sent to the browser. Configuration
+alone does not prove the bot uses this destination.
+
+The adapter reads `/api/v1/paid-budgets` and a bounded sample of 200 recent
+`/api/v1/request-logs` entries. Requests, prompts, arbitrary metadata and account
+identifiers are omitted. The budget API must be deployed in Proxx before it can
+return allowance data. Unsupported or failed API reads appear unavailable;
+missing values never become zero spending. The view separates confirmed charges,
+all unresolved holds, prior-period carried holds, and daily/monthly remaining
+allowance. Both UTC limits apply together. Carried holds are a subset of the
+held total, so the dashboard does not subtract them twice.
+
+Recent actual-route costs and mean provider TTFT/decode TPS are a bounded
+operational sample, not invoice reconciliation, end-to-end usable-answer latency,
+model-quality evaluation, or proof that a specific bot originated every request.
+Absent actual-upstream identity on historical rows remains visible through the
+legacy requested model. Runtime activation and paired E4B/Lens evaluation require
+separate receipts.

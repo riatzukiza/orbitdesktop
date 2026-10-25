@@ -53,6 +53,13 @@
       </form>
       <p role="status" id="error" hidden></p>
       <section aria-label="Machines" id="hosts" class="hosts"></section>
+      <section class="panel" aria-label="Bot routing and budget">
+        <div class="section-head"><h2>Bot routing &amp; allowance</h2><span id="proxx-status" class="tag">Unknown</span></div>
+        <p id="proxx-description" class="muted"></p>
+        <div id="proxx-budgets"></div>
+        <p class="muted">UTC limits apply together. Unresolved holds reduce both allowances until reconciled. Route timings below are provider attempt measurements; they do not establish time to a usable answer or bot quality.</p>
+        <div id="proxx-routes"></div>
+      </section>
       <div class="columns">
         <section class="panel">
           <div class="section-head">

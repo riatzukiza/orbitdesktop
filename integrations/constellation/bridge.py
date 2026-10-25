@@ -177,14 +177,40 @@ def host_call(cfg, host, action, args):
     return peer_call(cfg['peers'][host],action,args)
 
 
+def proxx_observation(cfg):
+    service = cfg.get('proxx')
+    if not service:
+        return {'configured': False, 'status': 'unavailable'}
+    parsed = urllib.parse.urlsplit(service['url'])
+    if (parsed.scheme not in ('http', 'https') or parsed.username or parsed.password
+            or parsed.query or parsed.fragment
+            or (parsed.scheme == 'http' and parsed.hostname not in ('127.0.0.1', 'localhost', '::1'))):
+        raise ValueError('Proxx requires HTTPS or loopback HTTP without URL credentials')
+    base = service['url'].rstrip('/')
+    def call(path):
+        return fetch(base + path, token=service.get('token'))
+    budgets = attempt(lambda: call('/api/v1/paid-budgets'))
+    def usage():
+        response = call('/api/v1/request-logs?limit=200')
+        # Never forward prompts, credentials, metadata or arbitrary upstream fields.
+        fields = ('id', 'timestamp', 'providerId', 'model', 'upstreamModel',
+                  'status', 'costUsd', 'promptTokens', 'completionTokens', 'ttftMs', 'tps')
+        return {'entries': [{k: entry[k] for k in fields if k in entry}
+                            for entry in response.get('entries', [])[:200]],
+                'limit': 200, 'coverage': 'recent attempts; not a billing statement'}
+    return {'configured': True, 'label': service.get('label', 'Configured Proxx'),
+            'observed_at': now(), 'budgets': budgets, 'usage': attempt(usage)}
+
+
 def snapshot(cfg):
     hosts = [cfg['host'], *cfg.get('peers',{})]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         futures = {host:pool.submit(attempt,lambda host=host:host_call(cfg,host,'probe',{})) for host in hosts}
         memory_future = pool.submit(attempt,lambda:memory(cfg,'overview',{}))
+        proxx_future = pool.submit(attempt,lambda:proxx_observation(cfg))
         return {'observed_at':now(), 'workspace_id':cfg.get('workspace_id'),
                 'public_origin':cfg.get('public_origin'), 'hosts':{host:future.result() for host,future in futures.items()},
-                'openplanner':memory_future.result(), 'links':cfg.get('links',{}),
+                'openplanner':memory_future.result(), 'proxx':proxx_future.result(), 'links':cfg.get('links',{}),
                 'semantics':'Session records are history, process counts are observed; neither proves a session is active.'}
 
 

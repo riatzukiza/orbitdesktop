@@ -59,4 +59,34 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['native_session_id'],'native-fixture')
         self.assertEqual(result['answer'].strip(),'Verified fixture answer')
 
+    def test_proxx_is_explicit_and_never_assumes_unconfigured_budget_is_zero(self):
+        self.assertEqual(bridge.proxx_observation(self.cfg), {'configured': False, 'status': 'unavailable'})
+        for url in ('http://remote.example', 'https://user:secret@example.com', 'https://example.com?token=secret'):
+            with self.assertRaises(ValueError):
+                bridge.proxx_observation({**self.cfg, 'proxx': {'url': url, 'token': 'private'}})
+
+    def test_proxx_projection_redacts_request_content_and_keeps_actual_route(self):
+        cfg = {**self.cfg, 'proxx': {'url': 'http://127.0.0.1:8789', 'token': 'private', 'label': 'Bot ledger'}}
+        entry = {'id': 'one', 'model': 'gemma4:31b', 'upstreamModel': 'google/gemma-4-31b-it',
+                 'costUsd': 0, 'ttftMs': 123, 'tps': 38, 'status': 200,
+                 'metadata': {'secret': 'hidden'}, 'prompt': 'private contents', 'accountId': 'credential-label'}
+        def response(url, **kwargs):
+            self.assertEqual(kwargs['token'], 'private')
+            return {'budgets': []} if url.endswith('paid-budgets') else {'entries': [entry]}
+        with patch.object(bridge, 'fetch', side_effect=response):
+            result = bridge.proxx_observation(cfg)
+        observed = result['usage']['data']['entries'][0]
+        self.assertEqual(observed['upstreamModel'], 'google/gemma-4-31b-it')
+        self.assertEqual(observed['costUsd'], 0)
+        for field in ('metadata', 'prompt', 'accountId'):
+            self.assertNotIn(field, observed)
+        self.assertNotIn('private', json.dumps(result))
+
+    def test_proxx_failure_never_reflects_credentials_or_response_body(self):
+        cfg = {**self.cfg, 'proxx': {'url': 'https://example.com', 'token': 'secret'}}
+        with patch.object(bridge, 'fetch', side_effect=ValueError('secret response')):
+            result = bridge.proxx_observation(cfg)
+        self.assertFalse(result['budgets']['ok'])
+        self.assertNotIn('secret', json.dumps(result))
+
 if __name__=='__main__':unittest.main()
