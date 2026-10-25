@@ -328,3 +328,25 @@ and distinguishes first-usable timing from provider TTFT. Timing quantiles are
 conditional on observed output, not promises for failed requests. The renderer
 states that tool selection is not actual execution and author scoring is not
 independent evaluation. Configuring or refreshing this surface never runs a model.
+
+### Native review on the owner fork
+
+The fork's `Constellation evidence review` workflow calls the same immutable
+eta-mu/Muse/Agents revisions used by the Services release review. It binds the
+pull request's exact head and supplies a side-effect-free diff-stat evidence
+lane; the existing npm and browser workflows retain their own checks. The
+reusable workflow defaults to the free OpenCode MiMo reviewer.
+
+Native publication requires the existing `eta-mu-ai` GitHub App to be installed
+on the owner fork, and `ETA_MU_APP_ID` / `ETA_MU_APP_PRIVATE_KEY` to be provisioned
+through GitHub Actions secrets. No App credential belongs in this repository,
+the portable source bundle, a screenshot, or chat. Installing the App or
+provisioning its signing credential is a separate owner-authorized action;
+adding the workflow does not grant that access. Missing credentials fail the
+review job with an explicit operator instruction and supply no review credit.
+
+GitHub disables inherited workflows on newly created forks until their owner
+enables Actions. That fork-level activation is separate from the repository
+Actions permission reported by the REST API. Keep the existing expensive
+Asteria, technology and Workbench acceptance workflows under their original
+manual/weekly activation controls.
