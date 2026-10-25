@@ -178,7 +178,7 @@ function renderEvaluation(result) {
   }
   $("evaluation-results").append(table);
   $("evaluation-decision").textContent = data.decision;
-  $("evaluation-evidence").textContent = "Recorded " + data.observedAt + " · " + data.sampleCount + " samples · source SHA256 " + data.sourceSha256
+  $("evaluation-evidence").textContent = "Recorded " + data.observedAt + " · " + (Number.isFinite(data.sampleCount) ? data.sampleCount : "Unknown") + " samples · source SHA256 " + data.sourceSha256
     + ". Timing quantiles exclude failures, which are counted separately. Quality is author adjudication; tool selection is not execution. Refresh does not run models.";
 }
 function render(snapshot) {
