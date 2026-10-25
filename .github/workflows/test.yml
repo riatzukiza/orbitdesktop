@@ -27,6 +27,10 @@ jobs:
       - name: Prepare isolated test scratch directory
         run: mkdir -p /tmp/opencode
       - run: npm run check
+      - name: Constellation authentication and observation boundaries
+        run: |
+          node --test integrations/constellation/test-axxium-auth.mjs integrations/constellation/test-surface.mjs integrations/constellation/test-terminal-scope.mjs integrations/constellation/test-gateway-boundaries.mjs
+          python3 -m unittest integrations/constellation/test_bridge.py
       - run: python3 -m unittest discover -s tests -p test_hermes_plugin.py -v
       - run: python3 -m unittest discover -s tests -p test_normal_resource_retention.py -v
       - name: Widget schema and publisher parity

@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { createAxxiumAuth, AUTH_PATHS } from "./axxium-auth.mjs";
+import { createTerminalScope } from "./terminal-scope.mjs";
 const configPath = process.env.ORBIT_CONSTELLATION_CONFIG;
 if (!configPath || fs.statSync(configPath).mode & 0o077)
   throw Error("Owner-only configuration required");
@@ -218,11 +219,13 @@ const server = http.createServer(async (req, res) => {
         return reply(res, 403, "Same-origin login required.");
       const current = Date.now();
       loginAttempts = loginAttempts.filter((t) => current - t < 60000);
-      if (loginAttempts.length >= 12)
-        return reply(res, 429, "Try again in one minute.");
-      loginAttempts.push(current);
       const form = new URLSearchParams((await body(req, 4096)).toString());
-      if (!equal(form.get("token"), orbitToken)) return reply(res, 401, login);
+      if (!equal(form.get("token"), orbitToken)) {
+        if (loginAttempts.length >= 12)
+          return reply(res, 429, "Try again in one minute.");
+        loginAttempts.push(current);
+        return reply(res, 401, login);
+      }
       const value =
         String(Date.now() + 12 * 3600000) +
         "." +
@@ -390,7 +393,7 @@ server.on("upgrade", async (req, socket, head) => {
       !hosts.has(req.headers.host) ||
       !origins.has(req.headers.origin) ||
       !(await authenticated(req)) ||
-      !req.url.startsWith("/api/")
+      req.url !== "/api/terminal"
     ) {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       return;
@@ -402,15 +405,33 @@ server.on("upgrade", async (req, socket, head) => {
       );
       const queued = [];
       let bytes = 0;
+      const scope = createTerminalScope({
+        workspaceId: cfg.workspace_id,
+        readWorkspace: async () => {
+          const response = await fetch(`http://127.0.0.1:${cfg.orbit_port}/api/workspace`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${orbitToken}`, Origin: `http://127.0.0.1:${cfg.orbit_port}`, "Content-Type": "application/json" },
+            body: JSON.stringify({workspace_id: cfg.workspace_id, action: "read"}),
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!response.ok) throw Error("Workspace unavailable");
+          return response.json();
+        },
+      });
+      let forwarding = Promise.resolve(), pendingBytes = 0;
       client.on("message", (raw, binary) => {
-        if (upstream.readyState === WebSocket.OPEN)
-          upstream.send(raw, { binary });
-        else if (
-          upstream.readyState === WebSocket.CONNECTING &&
-          (bytes += raw.length) < 65536
-        )
-          queued.push([raw, binary]);
-        else client.close(1008);
+        pendingBytes += raw.length;
+        if (binary || pendingBytes >= 65536) return client.close(1008);
+        forwarding = forwarding.then(async () => {
+          if (client.readyState !== WebSocket.OPEN) return;
+          await scope(raw);
+          if (client.readyState !== WebSocket.OPEN) return;
+          if (upstream.readyState === WebSocket.OPEN) upstream.send(raw, { binary: false });
+          else if (upstream.readyState === WebSocket.CONNECTING && (bytes += raw.length) < 65536)
+            queued.push([raw, false]);
+          else client.close(1008);
+        }).catch(() => client.close(1008, "Shared terminal membership required"))
+          .finally(() => { pendingBytes -= raw.length; });
       });
       upstream.on("open", () => {
         for (const [raw, binary] of queued) upstream.send(raw, { binary });

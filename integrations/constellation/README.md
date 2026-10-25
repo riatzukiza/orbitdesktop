@@ -350,3 +350,26 @@ enables Actions. That fork-level activation is separate from the repository
 Actions permission reported by the REST API. Keep the existing expensive
 Asteria, technology and Workbench acceptance workflows under their original
 manual/weekly activation controls.
+
+
+### Shared terminal boundary
+
+The gateway exposes only Orbit's terminal WebSocket endpoint. It serializes
+client frames through a bounded queue and checks the terminal pane against
+Orbit's current configured workspace snapshot before forwarding each frame.
+Foreign panes, changed pane identities, non-terminal panes, removed panes,
+binary frames and unavailable workspace authority fail closed. The owner token
+remains with the existing authenticated session and local Orbit; this check
+does not grant a new terminal or cross-workspace capability.
+
+Failed owner-token attempts are throttled after credential comparison; a correct
+owner token can still sign in after anonymous failures. Budget observations
+project only dashboard fields, normalize absent usage to an empty object, and
+preserve all returned budget and route rows. The Caddy template uses default
+stream flushing so browser disconnects cancel upstream requests; SSE remains
+immediately flushed by Caddy.
+
+Run the native gateway boundary check with
+`node --test integrations/constellation/test-gateway-boundaries.mjs`; it launches
+only isolated fixture services, uses no model calls, and checks actual HTTP
+login plus WebSocket frame forwarding.

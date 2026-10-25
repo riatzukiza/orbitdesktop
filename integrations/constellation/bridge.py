@@ -190,7 +190,24 @@ def proxx_observation(cfg):
     base = service['url'].rstrip('/')
     def call(path):
         return fetch(base + path, token=service.get('token'))
-    budgets = attempt(lambda: call('/api/v1/paid-budgets'))
+    def budget_view():
+        response = call('/api/v1/paid-budgets')
+        top = ('scopeId', 'status', 'dailyMicrousd', 'monthlyMicrousd',
+               'dailyRemainingMicrousd', 'monthlyRemainingMicrousd')
+        usage_fields = ('dailyChargedMicrousd', 'monthlyChargedMicrousd', 'heldMicrousd',
+                        'dailyCarriedMicrousd', 'monthlyCarriedMicrousd', 'unresolvedCount')
+        rows = []
+        for budget in (response.get('budgets') or []):
+            if not isinstance(budget, dict):
+                continue
+            usage = budget.get('usage') if isinstance(budget.get('usage'), dict) else {}
+            routes = budget.get('routes') if isinstance(budget.get('routes'), list) else []
+            rows.append({**{k: budget[k] for k in top if k in budget},
+                         'usage': {k: usage[k] for k in usage_fields if k in usage},
+                         'routes': [{k: route[k] for k in ('upstreamModel', 'billing') if k in route}
+                                    for route in routes if isinstance(route, dict)]})
+        return {'budgets': rows}
+    budgets = attempt(budget_view)
     def usage():
         response = call('/api/v1/request-logs?limit=200')
         # Never forward prompts, credentials, metadata or arbitrary upstream fields.

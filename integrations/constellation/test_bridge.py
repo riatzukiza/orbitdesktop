@@ -82,6 +82,21 @@ class BridgeTests(unittest.TestCase):
             self.assertNotIn(field, observed)
         self.assertNotIn('private', json.dumps(result))
 
+    def test_budget_projection_normalizes_usage_and_removes_private_fields(self):
+        cfg = {**self.cfg, 'proxx': {'url': 'http://127.0.0.1:8789'}}
+        budgets = [{'scopeId': 'bot', 'accountId': 'private-account', 'metadata': {'secret': 'hidden'},
+                    'usage': None, 'dailyMicrousd': 500000,
+                    'routes': [{'upstreamModel': str(i), 'billing': 'free', 'credential': 'secret'} for i in range(250)]}
+                   for _ in range(250)]
+        with patch.object(bridge, 'fetch', side_effect=lambda url, **kw: {'budgets': budgets} if url.endswith('paid-budgets') else {'entries': []}):
+            result = bridge.proxx_observation(cfg)['budgets']['data']['budgets']
+        self.assertEqual(len(result), 250)
+        self.assertEqual(len(result[0]['routes']), 250)
+        self.assertEqual(result[0]['usage'], {})
+        self.assertEqual(result[0]['dailyMicrousd'], 500000)
+        self.assertNotIn('secret', json.dumps(result))
+        self.assertNotIn('private-account', json.dumps(result))
+
     def test_proxx_failure_never_reflects_credentials_or_response_body(self):
         cfg = {**self.cfg, 'proxx': {'url': 'https://example.com', 'token': 'secret'}}
         with patch.object(bridge, 'fetch', side_effect=ValueError('secret response')):
