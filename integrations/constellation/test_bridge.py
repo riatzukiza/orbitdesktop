@@ -102,4 +102,28 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(harnesses['claude']['sessions']['ok'])
         self.assertFalse(harnesses['opencode']['sessions']['ok'])
 
+    def test_model_evaluation_forwards_only_bounded_aggregate_evidence(self):
+        path=Path(self.temp.name)/'evaluation.json'
+        report={'version':1,'sourceSha256':'a'*64,'sampleCount':96,'observedAt':'fixture',
+                'scope':'single load window','decision':'Do not broadly adopt yet',
+                'privatePrompts':'secret','summary':[{'model':'e4b','condition':'clean','samples':24,
+                'completed':22,'timeouts':2,'httpErrors':0,'firstUsableP50Ms':7000,
+                'firstUsableP95Ms':float('inf'),'grounding':True,'privateAnswer':'secret'}]}
+        path.write_text(json.dumps(report))
+        result=bridge.model_evaluation({**self.cfg,'model_evaluation_file':str(path)})
+        self.assertEqual(result['sampleCount'],96)
+        self.assertEqual(result['summary'][0]['completed'],22)
+        self.assertIsNone(result['summary'][0]['firstUsableP95Ms'])
+        self.assertIsNone(result['summary'][0]['grounding'])
+        self.assertNotIn('secret',json.dumps(result))
+        self.assertEqual(bridge.model_evaluation(self.cfg),{'configured':False})
+
+    def test_model_evaluation_refuses_oversize_or_unknown_provenance(self):
+        path=Path(self.temp.name)/'evaluation.json'
+        cfg={**self.cfg,'model_evaluation_file':str(path)}
+        path.write_text('x'*65537)
+        with self.assertRaises(ValueError):bridge.model_evaluation(cfg)
+        path.write_text(json.dumps({'version':1,'sourceSha256':'invalid'}))
+        with self.assertRaises(ValueError):bridge.model_evaluation(cfg)
+
 if __name__=='__main__':unittest.main()

@@ -13,6 +13,7 @@ let budgets = { ok: true, data: { budgets: [{ scopeId: 'bot', status: 'ok', dail
     dailyCarriedMicrousd: 50000, monthlyCarriedMicrousd: 20000, unresolvedCount: 2 },
   routes: [{ upstreamModel: 'google/gemma-4-31b-it', billing: 'free' }] }] } };
 const snapshot = () => ({ hosts: {}, links: {}, openplanner: {ok:false}, observed_at: new Date().toISOString(),
+  evaluation:{ok:true,data:{configured:true,sourceSha256:'a'.repeat(64),sampleCount:96,observedAt:'fixture',scope:'Single window; fixture only',decision:'Not a live adoption claim',summary:[{model:'e4b',condition:'clean',samples:24,completed:22,timeouts:2,httpErrors:0,firstUsableP50Ms:7000,firstUsableP95Ms:13000,grounding:43,instruction:32,toolCorrectness:44,qualityMaximumPerDimension:44}] }},
   proxx: {ok:true, data: {configured:true,label:'Fixture ledger',observed_at:new Date().toISOString(),budgets,
     usage:{ok:true,data:{entries:[{providerId:'requesty',model:'gemma4:31b',upstreamModel:'google/gemma-4-31b-it',
       status:200,costUsd:0,ttftMs:100,tps:38},{status:200}]}}}} });
@@ -41,6 +42,10 @@ try {
   assert.match(await page.locator('#proxx-routes').textContent(),/\$0.0000/);
   assert.match(await page.locator('#proxx-routes').textContent(),/Unknown provider/);
   assert.doesNotMatch(await page.locator('#proxx-routes').textContent(),/undefined|Unknown ms/);
+  assert.match(await page.locator('#evaluation-results').textContent(),/22\/24/);
+  assert.match(await page.locator('#evaluation-results').textContent(),/7.00s/);
+  assert.match(await page.locator('#evaluation-evidence').textContent(),/96 samples/);
+  assert.match(await page.locator('#evaluation-evidence').textContent(),/tool selection is not execution/);
   budgets={ok:false,error:'unavailable'};
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.locator('#proxx-budgets').getByText(/remaining allowance is unknown/).waitFor();

@@ -203,15 +203,43 @@ def proxx_observation(cfg):
             'observed_at': now(), 'budgets': budgets, 'usage': attempt(usage)}
 
 
+def model_evaluation(cfg):
+    name = cfg.get('model_evaluation_file')
+    if not name:
+        return {'configured': False}
+    with Path(name).expanduser().open('rb') as source:
+        raw = source.read(65537)
+    if len(raw) > 65536:
+        raise ValueError('Evaluation summary exceeds bound')
+    report = json.loads(raw)
+    if report.get('version') != 1 or not re.fullmatch('[0-9a-f]{64}', str(report.get('sourceSha256', ''))):
+        raise ValueError('Unsupported evaluation provenance')
+    def number(value):
+        return value if type(value) in (int, float) and 0 <= value <= 9007199254740991 else None
+    numeric = ('samples', 'completed', 'timeouts', 'httpErrors', 'firstUsableP50Ms',
+               'firstUsableP95Ms', 'grounding', 'instruction', 'toolCorrectness', 'qualityMaximumPerDimension')
+    rows = []
+    for row in report.get('summary', [])[:8]:
+        if row.get('model') not in ('e4b', '31b-free') or row.get('condition') not in ('clean', 'lens'):
+            raise ValueError('Unknown evaluation condition')
+        rows.append({'model': row['model'], 'condition': row['condition'],
+                     **{key: number(row.get(key)) for key in numeric}})
+    return {'configured': True, 'observedAt': str(report.get('observedAt', 'Unknown'))[:64],
+            'sourceSha256': report['sourceSha256'], 'sampleCount': number(report.get('sampleCount')),
+            'scope': str(report.get('scope', 'Unknown'))[:1000],
+            'decision': str(report.get('decision', 'Not adjudicated'))[:1000], 'summary': rows}
+
+
 def snapshot(cfg):
     hosts = [cfg['host'], *cfg.get('peers',{})]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         futures = {host:pool.submit(attempt,lambda host=host:host_call(cfg,host,'probe',{})) for host in hosts}
         memory_future = pool.submit(attempt,lambda:memory(cfg,'overview',{}))
         proxx_future = pool.submit(attempt,lambda:proxx_observation(cfg))
+        evaluation_future = pool.submit(attempt,lambda:model_evaluation(cfg))
         return {'observed_at':now(), 'workspace_id':cfg.get('workspace_id'),
                 'public_origin':cfg.get('public_origin'), 'hosts':{host:future.result() for host,future in futures.items()},
-                'openplanner':memory_future.result(), 'proxx':proxx_future.result(), 'links':cfg.get('links',{}),
+                'openplanner':memory_future.result(), 'proxx':proxx_future.result(), 'evaluation':evaluation_future.result(), 'links':cfg.get('links',{}),
                 'semantics':'Session records are history, process counts are observed; neither proves a session is active.'}
 
 

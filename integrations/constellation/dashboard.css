@@ -465,3 +465,8 @@ footer {
 #proxx-routes { overflow-x: auto; }
 #proxx-routes table { width: 100%; border-collapse: collapse; }
 #proxx-routes th, #proxx-routes td { text-align: left; padding: .6rem; border-bottom: 1px solid #ffffff18; }
+
+.evaluation-table { overflow-x: auto; }
+.evaluation-table table { width: 100%; border-collapse: collapse; }
+.evaluation-table th, .evaluation-table td { text-align: left; padding: .6rem; border-bottom: 1px solid #ffffff18; }
+#evaluation-evidence { overflow-wrap: anywhere; }

@@ -150,9 +150,36 @@ function renderProxx(result) {
   }
   $("proxx-routes").append(el("p", entries.length + " recent attempts. This sample is not the monthly invoice or proof that a specific agent made every request.", "muted"), table);
 }
+function renderEvaluation(result) {
+  const data = result?.ok && result.data.configured ? result.data : undefined;
+  $("evaluation-results").replaceChildren();
+  $("evaluation-decision").textContent = "";
+  $("evaluation-evidence").textContent = "";
+  $("evaluation-scope").textContent = data?.scope || "No recorded evaluation configured. Missing evidence is not a passing result.";
+  if (!data) return;
+  const table = el("table"), header = el("tr");
+  for (const label of ["Model / context", "Completed", "Median usable", "p95 usable", "Timeout / HTTP", "Quality points"])
+    header.append(el("th", label));
+  table.append(header);
+  const seconds = ms => Number.isFinite(ms) ? (ms / 1000).toFixed(2) + "s" : "Unknown";
+  for (const row of data.summary || []) {
+    const tr = el("tr");
+    const quality = [row.grounding, row.instruction, row.toolCorrectness, row.qualityMaximumPerDimension].every(Number.isFinite)
+      ? row.grounding + "/" + row.qualityMaximumPerDimension + " grounding · " + row.instruction + "/" + row.qualityMaximumPerDimension + " instructions · " + row.toolCorrectness + "/" + row.qualityMaximumPerDimension + " tool selection"
+      : "Not adjudicated";
+    for (const value of [row.model + " / " + row.condition, Number.isFinite(row.completed) && Number.isFinite(row.samples) ? row.completed + "/" + row.samples : "Unknown",
+      seconds(row.firstUsableP50Ms), seconds(row.firstUsableP95Ms), (row.timeouts ?? "Unknown") + " / " + (row.httpErrors ?? "Unknown"), quality]) tr.append(el("td", value));
+    table.append(tr);
+  }
+  $("evaluation-results").append(table);
+  $("evaluation-decision").textContent = data.decision;
+  $("evaluation-evidence").textContent = "Recorded " + data.observedAt + " · " + data.sampleCount + " samples · source SHA256 " + data.sourceSha256
+    + ". Timing quantiles exclude failures, which are counted separately. Quality is author adjudication; tool selection is not execution. Refresh does not run models.";
+}
 function render(snapshot) {
   current = snapshot;
   renderProxx(snapshot.proxx);
+  renderEvaluation(snapshot.evaluation);
   $("hosts").replaceChildren();
   for (const [name, result] of Object.entries(snapshot.hosts)) {
     const card = el("article", undefined, "host"),

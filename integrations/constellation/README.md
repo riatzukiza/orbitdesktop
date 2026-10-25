@@ -308,3 +308,14 @@ adapter process, concurrent duplicate callbacks and replay after success are
 refused. Failed callbacks consume their server-issued state too; arbitrary URL state values cannot allocate the bounded replay cache. A process restart invalidates pending sign-ins. Unsuccessful exchanges
 never create a desktop session; authority availability remains a separate live
 precondition. The protocol fixture proves these boundaries without real accounts.
+
+
+An optional `model_evaluation_file` in the private config points to a bounded,
+version1 aggregate report. The adapter forwards only known model/context rows,
+finite nonnegative counters/timings/quality sums, provenance hash and bounded
+scope/decision notes. It never forwards sample prompts, answers or tool results.
+The dashboard labels this a recorded experiment, keeps failure counts visible,
+and distinguishes first-usable timing from provider TTFT. Timing quantiles are
+conditional on observed output, not promises for failed requests. The renderer
+states that tool selection is not actual execution and author scoring is not
+independent evaluation. Configuring or refreshing this surface never runs a model.
