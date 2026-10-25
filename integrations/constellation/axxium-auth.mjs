@@ -97,8 +97,29 @@ export function createAxxiumAuth({
   const cfg = validateAxxiumConfiguration(config, origin);
   if (!cfg) return null;
   const callback = origin + AUTH_PATHS.callback;
-  const transactions = new Map(),
-    sessions = new Map();
+  // Anonymous starts allocate no server-side pending state. Only successful
+  // redemptions are retained; PKCE/code one-use remains enforced by Axxium.
+  const transactions = new Map(), sessions = new Map(), inFlight = new Set();
+  const transactionKey = crypto.randomBytes(32);
+  const transactionAad = Buffer.from(origin + "|" + cfg.issuer + "|" + cfg.client_id);
+  function sealTransaction(value) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", transactionKey, iv);
+    cipher.setAAD(transactionAad);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64url");
+  }
+  function openTransaction(value) {
+    if (!value || value.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(value)) throw denied();
+    try {
+      const bytes = Buffer.from(value, "base64url");
+      if (bytes.length < 29) throw denied();
+      const decipher = crypto.createDecipheriv("aes-256-gcm", transactionKey, bytes.subarray(0, 12));
+      decipher.setAAD(transactionAad);
+      decipher.setAuthTag(bytes.subarray(12, 28));
+      return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString("utf8"));
+    } catch { throw denied(); }
+  }
   let discovery;
   const approved = (subject) => cfg.allowed_subjects.includes(subject);
   function prune() {
@@ -204,16 +225,10 @@ export function createAxxiumAuth({
   }
   async function start() {
     prune();
-    if (transactions.size >= 1000)
-      throw Object.assign(
-        new Error("Too many pending sign-ins; try again later."),
-        { status: 429 },
-      );
     const rp = await client();
     const verifier = oidc.randomPKCECodeVerifier(),
       state = oidc.randomState(),
-      nonce = oidc.randomNonce(),
-      binding = random();
+      nonce = oidc.randomNonce();
     const url = oidc.buildAuthorizationUrl(rp, {
       redirect_uri: callback,
       response_type: "code",
@@ -223,13 +238,7 @@ export function createAxxiumAuth({
       code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
       code_challenge_method: "S256",
     });
-    transactions.set(state, {
-      state,
-      nonce,
-      verifier,
-      binding: digest(binding),
-      expiresAt: clock() + 300000,
-    });
+    const binding = sealTransaction({state, nonce, verifier, expiresAt: clock() + 300000});
     return {
       location: url.href,
       cookies: [cookie(transactionCookie, binding, 300)],
@@ -239,16 +248,23 @@ export function createAxxiumAuth({
     prune();
     const states = url.searchParams.getAll("state");
     if (states.length !== 1) throw denied();
-    const transaction = transactions.get(states[0]);
-    transactions.delete(states[0]); // Never reuse a callback after uncertainty.
-    const binding = cookieValue(req.headers.cookie, transactionCookie);
-    if (
-      !transaction ||
-      !binding ||
-      binding.length > 256 ||
-      digest(binding) !== transaction.binding
-    )
+    const transaction = openTransaction(cookieValue(req.headers.cookie, transactionCookie));
+    if (transaction.state !== states[0] || typeof transaction.nonce !== "string"
+        || typeof transaction.verifier !== "string" || !Number.isFinite(transaction.expiresAt)
+        || transaction.expiresAt <= clock() || transactions.has(states[0]) || inFlight.has(states[0]))
       throw denied();
+    // Bound only simultaneous token exchanges, not five minutes of anonymous
+    // starts. An unsuccessful exchange cannot create a desktop session.
+    if (inFlight.size >= 1000)
+      throw Object.assign(new Error("Sign-in exchanges are busy; try again shortly."), {status: 429});
+    inFlight.add(states[0]);
+    try {
+      const result = await redeem(transaction, url);
+      transactions.set(states[0], {expiresAt: transaction.expiresAt});
+      return result;
+    } finally { inFlight.delete(states[0]); }
+  }
+  async function redeem(transaction, url) {
     const rp = await client();
     let tokens;
     try {
@@ -283,7 +299,7 @@ export function createAxxiumAuth({
     };
     if (!(await current(session))) throw denied();
     prune();
-    if (sessions.size >= 10000)
+    if (sessions.size >= 10000 || transactions.size >= 10000)
       throw Object.assign(new Error("Desktop session capacity reached."), {
         status: 503,
       });

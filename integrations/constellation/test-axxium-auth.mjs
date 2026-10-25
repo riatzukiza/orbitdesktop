@@ -280,3 +280,32 @@ test("tampered local session cookies do not authenticate", async () => {
     null,
   );
 });
+
+test("anonymous sign-in starts cannot fill a shared pending-state map", async () => {
+  const f = fixture();
+  for (let i = 0; i < 1005; i++) await f.auth.start();
+  const req = await f.login();
+  assert.equal((await f.auth.authenticate(req)).subject, owner);
+});
+
+test("tampered transaction cookies are refused before any token exchange", async () => {
+  const f = fixture(), start = await f.begin();
+  const before = f.state.requests.length;
+  const cookie = start.req.headers.cookie;
+  const split = cookie.indexOf('=') + 1;
+  const altered = cookie.slice(0, split + 8) + (cookie[split + 8] === 'A' ? 'B' : 'A') + cookie.slice(split + 9);
+  await assert.rejects(f.auth.complete({headers:{cookie:altered}}, start.url));
+  assert.equal(f.state.requests.length, before);
+});
+
+test("concurrent copies of one transaction cannot mint two sessions", async () => {
+  const f=fixture(), start=await f.begin();
+  const results=await Promise.allSettled([f.auth.complete(start.req,start.url),f.auth.complete(start.req,start.url)]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(results.filter(x=>x.status==='rejected').length,1);
+});
+
+test("a process-local transaction cannot be redeemed by another adapter instance", async () => {
+  const first=fixture(), second=fixture(), start=await first.begin();
+  await assert.rejects(second.auth.complete(start.req,start.url));
+});
