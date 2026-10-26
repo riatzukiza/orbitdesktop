@@ -373,3 +373,8 @@ Run the native gateway boundary check with
 `node --test integrations/constellation/test-gateway-boundaries.mjs`; it launches
 only isolated fixture services, uses no model calls, and checks actual HTTP
 login plus WebSocket frame forwarding.
+
+Worker execution keeps its 900-second deadline active while delivering stdin and
+waiting for process exit. Exceeding the output/deadline bounds or failing to exit
+within ten seconds of stdout EOF kills and reaps the explicitly owned worker
+process group. Existing desktop sessions are never part of that group.

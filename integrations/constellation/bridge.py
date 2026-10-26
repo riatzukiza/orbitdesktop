@@ -321,15 +321,17 @@ def run_job(cfg, record, command, directory, prompt):
     path = job_dir(cfg)/(record['id']+'.json')
     try:
         with subprocess.Popen(command,cwd=directory,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True) as process:
-            record.update(state='running',pid=process.pid,process_start=Path('/proc/'+str(process.pid)+'/stat').read_text().rsplit(')',1)[1].split()[19],boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),updated_at=now())
-            write_private(path,record)
-            process.stdin.write(prompt.encode());process.stdin.close()
             def terminate():
-                try:os.killpg(process.pid,signal.SIGTERM)
+                # This process group belongs only to the explicitly launched job.
+                # A worker may ignore SIGTERM or close stdout while staying alive.
+                try:os.killpg(process.pid,signal.SIGKILL)
                 except ProcessLookupError:pass
             timer = threading.Timer(900, terminate);timer.start()
             total = 0
             try:
+                record.update(state='running',pid=process.pid,process_start=Path('/proc/'+str(process.pid)+'/stat').read_text().rsplit(')',1)[1].split()[19],boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),updated_at=now())
+                write_private(path,record)
+                process.stdin.write(prompt.encode());process.stdin.close()
                 for raw in iter(lambda:process.stdout.readline(65537),b''):
                     total += len(raw)
                     if total > 10_000_000 or len(raw)>65536:
@@ -355,6 +357,9 @@ def run_job(cfg, record, command, directory, prompt):
                 code=process.wait(timeout=10)
             finally:
                 timer.cancel()
+                if process.poll() is None:
+                    terminate()
+                    process.wait(timeout=5)
             record.update(state='completed' if code==0 else 'failed',exit_code=code,updated_at=now())
     except Exception as error:
         record.update(state='failed',error=safe_error(error),updated_at=now())

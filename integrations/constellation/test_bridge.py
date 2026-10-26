@@ -1,6 +1,9 @@
 """Boundary and recovery checks. No model calls or production mutations."""
 import importlib.util
 import json
+import os
+import signal
+import threading
 from pathlib import Path
 import tempfile
 import sys
@@ -58,6 +61,32 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['state'],'completed')
         self.assertEqual(result['native_session_id'],'native-fixture')
         self.assertEqual(result['answer'].strip(),'Verified fixture answer')
+
+    def test_worker_that_closes_stdout_cannot_leave_an_unbounded_exit_wait(self):
+        record = {'id': str(uuid.uuid4()), 'host': 'fixture', 'state': 'accepted'}
+        real_popen = bridge.subprocess.Popen
+        children = []
+        def tracked_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            children.append(process)
+            wait = process.wait
+            process.wait = lambda timeout=None: wait(timeout=0.05 if timeout == 10 else timeout)
+            return process
+        script = "import os,signal,sys,time; sys.stdin.read(); signal.signal(signal.SIGTERM,signal.SIG_IGN); os.close(1); time.sleep(60)"
+        with patch.object(bridge.subprocess, 'Popen', side_effect=tracked_popen):
+            worker = threading.Thread(target=bridge.run_job, args=(self.cfg, record, [sys.executable, '-c', script], self.temp.name, 'fixture'), daemon=True)
+            worker.start()
+            try:
+                worker.join(timeout=2)
+                self.assertFalse(worker.is_alive(), 'stdout EOF must not lead to an unbounded Popen context exit')
+                self.assertEqual(record['state'], 'failed')
+                self.assertIsNotNone(children[0].poll())
+            finally:
+                for process in children:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=2)
+                worker.join(timeout=2)
 
     def test_proxx_is_explicit_and_never_assumes_unconfigured_budget_is_zero(self):
         self.assertEqual(bridge.proxx_observation(self.cfg), {'configured': False, 'status': 'unavailable'})
