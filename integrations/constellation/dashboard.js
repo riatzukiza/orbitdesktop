@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 const $ = (id) => document.getElementById(id);
-let token = sessionStorage.getItem("orbit.constellation.token") || "";
+let token = "";
+// Remove credentials persisted by earlier dashboard versions.
+sessionStorage.removeItem("orbit.constellation.token");
 let current,
   busy = false,
   dispatchHost = "",
   dispatchGeneration = 0,
+  jobsGeneration = 0,
   submissionPending = false,
   retainedSubmission;
 const el = (tag, text, cls) => {
@@ -355,12 +358,16 @@ async function projects() {
   }
 }
 async function refreshJobs() {
+  const host = $("target").value || "stealth";
+  const generation = ++jobsGeneration;
+  const currentSelection = () => generation === jobsGeneration && host === ($("target").value || "stealth");
   try {
     const list = await api(
-      "jobs?host=" + encodeURIComponent($("target").value || "stealth"),
+      "jobs?host=" + encodeURIComponent(host),
       undefined,
       { array: true },
     );
+    if (!currentSelection()) return;
     $("jobs").replaceChildren();
     for (const job of list) {
       const item = el("article", undefined, "job"),
@@ -375,19 +382,21 @@ async function refreshJobs() {
       $("jobs").append(item);
     }
   } catch (error) {
+    if (!currentSelection()) return;
     $("dispatch-status").textContent = error.message;
   }
 }
 $("unlock").onsubmit = (event) => {
   event.preventDefault();
   token = $("token").value;
-  sessionStorage.setItem("orbit.constellation.token", token);
   $("token").value = "";
   refresh();
 };
 $("refresh").onclick = refresh;
 $("filter").onchange = renderSessions;
 $("target").onchange = async () => {
+  jobsGeneration++;
+  $("jobs").replaceChildren();
   retainedSubmission = undefined;
   await projects();
   await refreshJobs();

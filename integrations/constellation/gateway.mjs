@@ -366,12 +366,11 @@ const server = http.createServer(async (req, res) => {
     const raw = ["GET", "HEAD"].includes(req.method)
       ? undefined
       : await body(req, 2_000_000);
-    if (
-      raw &&
-      String(req.headers["content-type"]).startsWith("application/json")
-    ) {
-      const value = JSON.parse(raw);
-      if (value.workspace_id && value.workspace_id !== cfg.workspace_id)
+    if (raw) {
+      let value;
+      try { value = JSON.parse(raw); } catch { /* Preserve non-JSON payload handling upstream. */ }
+      if (value && typeof value === "object" && !Array.isArray(value)
+          && Object.hasOwn(value, "workspace_id") && value.workspace_id !== cfg.workspace_id)
         return reply(res, 403, "Shared workspace mismatch.");
     }
     return proxy(req, res, cfg.orbit_port, url.pathname + url.search, raw, {

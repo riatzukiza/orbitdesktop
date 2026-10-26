@@ -11,9 +11,10 @@ import {WebSocket,WebSocketServer} from 'ws';
 test('real gateway preserves valid login and confines forwarded terminal frames', {timeout:15000}, async () => {
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'orbit-gateway-boundary-'));
   const token='fixture-owner-token-'.repeat(3);
-  let pane='own'; const frames=[];
+  let pane='own'; const frames=[]; let forwardedBodies=0;
   const upstream=http.createServer(async (req,res)=> {
     let raw='';for await(const chunk of req)raw+=chunk;
+    if(req.url==='/api/body-fixture'){forwardedBodies++;res.end('fixture forwarded');return;}
     assert.equal(req.url,'/api/workspace');
     assert.equal(req.headers.authorization,'Bearer '+token);
     assert.equal(JSON.parse(raw).workspace_id,'shared');
@@ -49,6 +50,16 @@ test('real gateway preserves valid login and confines forwarded terminal frames'
     for(let i=0;i<14;i++)assert.ok([401,429].includes((await login('wrong')).status));
     const valid=await login(token);assert.equal(valid.status,303);
     const cookie=valid.headers.get('set-cookie').split(';')[0];
+    for(const contentType of ['text/plain','application/json',undefined]) {
+      const headers={Origin:base,Cookie:cookie,...(contentType?{'Content-Type':contentType}:{})};
+      const mismatch=await fetch(base+'/api/body-fixture',{method:'POST',headers,body:JSON.stringify({workspace_id:'foreign'})});
+      assert.equal(mismatch.status,403,'JSON workspace mismatch must not depend on content type');
+    }
+    assert.equal(forwardedBodies,0);
+    for(const payload of ['not JSON','null','[]',JSON.stringify({workspace_id:'shared'})]) {
+      const response=await fetch(base+'/api/body-fixture',{method:'POST',headers:{Origin:base,Cookie:cookie,'Content-Type':'text/plain'},body:payload});
+      assert.equal(response.status,200,'defensive workspace inspection preserves other payloads');
+    }
     const connect=async()=>{const ws=new WebSocket(base.replace('http','ws')+'/api/terminal',{headers:{Origin:base,Cookie:cookie}});sockets.push(ws);await once(ws,'open');return ws;};
     const foreign=await connect();foreign.send(JSON.stringify({type:'auth',pane_id:'foreign'}));await once(foreign,'close');assert.equal(frames.length,0);
     const own=await connect();own.send(JSON.stringify({type:'auth',pane_id:'own'}));own.send(JSON.stringify({type:'input',data:'allowed'}));

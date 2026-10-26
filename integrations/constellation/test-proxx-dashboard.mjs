@@ -42,7 +42,9 @@ try {
   browser = await chromium.launch({headless:true,executablePath:process.env.ORBIT_TEST_BROWSER || path.join(os.homedir(),'.cache/ms-playwright/chromium-1234/chrome-linux64/chrome')});
   const page = await browser.newPage({viewport:{width:1100,height:900}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(()=>sessionStorage.setItem('orbit.constellation.token','legacy-fixture-token'));
   await page.goto('http://127.0.0.1:'+server.address().port);
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem('orbit.constellation.token')),null,'legacy bearer must be removed from browser storage');
   await page.locator('#dispatch-status').getByText('HTTP 503: projects temporarily unavailable',{exact:true}).waitFor();
   assert.equal(await page.locator('#send').isEnabled(),false);
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
@@ -85,6 +87,37 @@ try {
   await page.waitForFunction(()=>!document.getElementById('send').disabled);
   assert.equal(await page.locator('#project').inputValue(),'fixture-yoga');
   await page.unroute('**/api/submit'); await page.unroute('**/api/projects');
+
+  let releaseOldJobs, oldJobsSeen;
+  const oldJobsGate=new Promise(resolve=>releaseOldJobs=resolve), oldJobsRequested=new Promise(resolve=>oldJobsSeen=resolve);
+  await page.route('**/api/jobs?host=*',async route=>{
+    const host=new URL(route.request().url()).searchParams.get('host');
+    if(host==='stealth'){oldJobsSeen();await oldJobsGate;}
+    await route.fulfill({json:[{id:host+'-job',host,project:'fixture',harness:'codex',state:'accepted'}]});
+  });
+  await page.locator('#target').selectOption('stealth'); await oldJobsRequested;
+  assert.equal(await page.locator('#jobs article').count(),0,'host change clears the previous jobs before discovery completes');
+  await page.locator('#target').selectOption('yoga');
+  await page.locator('#jobs').getByText('yoga-job',{exact:true}).waitFor();
+  releaseOldJobs();
+  await page.waitForTimeout(100);
+  assert.doesNotMatch(await page.locator('#jobs').textContent(),/stealth-job/,'late old-host jobs must not replace current selection');
+  await page.unroute('**/api/jobs?host=*');
+  let releaseOldError, oldErrorSeen;
+  const oldErrorGate=new Promise(resolve=>releaseOldError=resolve), oldErrorRequested=new Promise(resolve=>oldErrorSeen=resolve);
+  await page.route('**/api/jobs?host=*',async route=>{
+    const host=new URL(route.request().url()).searchParams.get('host');
+    if(host==='stealth'){oldErrorSeen();await oldErrorGate;await route.fulfill({status:503,json:{error:'old-host-error'}});return;}
+    await route.fulfill({json:[{id:'current-yoga-job',host,project:'fixture',harness:'codex',state:'accepted'}]});
+  });
+  await page.locator('#target').selectOption('stealth'); await oldErrorRequested;
+  await page.locator('#target').selectOption('yoga');
+  await page.locator('#jobs').getByText('current-yoga-job',{exact:true}).waitFor();
+  releaseOldError();await page.waitForTimeout(100);
+  assert.doesNotMatch(await page.locator('#dispatch-status').textContent(),/old-host-error/,'stale host errors must not overwrite current selection status');
+  await page.unroute('**/api/jobs?host=*');
+  await page.locator('#unlock').evaluate(form=>{document.getElementById('token').value='memory-only-fixture';form.requestSubmit();});
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem('orbit.constellation.token')),null,'unlock bearer stays out of browser storage');
 
   assert.match(await page.locator('#proxx-routes').textContent(),/google\/gemma-4-31b-it/);
   assert.match(await page.locator('#proxx-routes').textContent(),/\$0.0000/);
