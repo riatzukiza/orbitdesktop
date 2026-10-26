@@ -33,6 +33,18 @@ test('real gateway preserves valid login and confines forwarded terminal frames'
   try {
     for(let i=0;i<60;i++) {try {if((await fetch(base+'/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,50));}
     assert.equal((await fetch(base+'/constellation/api/tool',{method:'POST',headers:{Origin:base,Authorization:'Bearer undefined','Content-Type':'application/json'},body:'{}'})).status,401,'missing MCP configuration must never authenticate a literal undefined token');
+    const oversized=await new Promise((resolve,reject)=>{
+      const request=http.request(base+'/login',{method:'POST',headers:{Origin:base,'Content-Type':'application/x-www-form-urlencoded','Content-Length':'12000'}},response=>{
+        const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>resolve({status:response.statusCode,connection:response.headers.connection,body:Buffer.concat(chunks).toString()}));
+      });
+      request.on('error',reject);
+      request.setTimeout(2000,()=>request.destroy(Error('oversized refusal stalled')));
+      request.write('x'.repeat(8192));
+    });
+    assert.equal(oversized.status,400);
+    assert.equal(oversized.connection,'close');
+    assert.match(oversized.body,/Invalid request/);
+    assert.equal((await fetch(base+'/health')).status,200);
     const login=token=>fetch(base+'/login',{method:'POST',redirect:'manual',headers:{Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({token})});
     for(let i=0;i<14;i++)assert.ok([401,429].includes((await login('wrong')).status));
     const valid=await login(token);assert.equal(valid.status,303);

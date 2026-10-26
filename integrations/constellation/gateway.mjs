@@ -68,7 +68,7 @@ const login = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta 
 async function body(req, max) {
   const chunks = [];
   let size = 0;
-  for await (const chunk of req) {
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
     if (size > max) throw Error("Body exceeds limit");
     chunks.push(chunk);
@@ -378,6 +378,11 @@ const server = http.createServer(async (req, res) => {
       "accept-encoding": "identity",
     });
   } catch (error) {
+    // Preserve the refusal while draining an oversized or unread request body.
+    if (!req.readableEnded) {
+      req.resume();
+      if (!res.headersSent) res.setHeader("Connection", "close");
+    }
     if (!res.headersSent)
       reply(
         res,
