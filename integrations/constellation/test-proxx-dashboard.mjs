@@ -14,6 +14,7 @@ let budgets = { ok: true, data: { budgets: [{ scopeId: 'bot', status: 'ok', dail
   routes: [{ upstreamModel: 'google/gemma-4-31b-it', billing: 'free' }] }] } };
 let sampleCount = 96;
 let projectFailures = 1;
+let searchResult = [];
 const snapshot = () => ({ hosts: {stealth:{ok:false,error:"fixture unavailable"}}, links: {}, openplanner: {ok:false}, observed_at: new Date().toISOString(),
   evaluation:{ok:true,data:{configured:true,sourceSha256:'a'.repeat(64),sampleCount,observedAt:'fixture',scope:'Single window; fixture only',decision:'Not a live adoption claim',summary:[{model:'e4b',condition:'clean',samples:24,completed:22,timeouts:2,httpErrors:0,firstUsableP50Ms:7000,firstUsableP95Ms:13000,grounding:43,instruction:32,toolCorrectness:44,qualityMaximumPerDimension:44}] }},
   proxx: {ok:true, data: {configured:true,label:'Fixture ledger',observed_at:new Date().toISOString(),budgets,
@@ -28,7 +29,7 @@ const server = createServer(async (req,res) => {
     }
     if (url.pathname === '/api/projects' && projectFailures-- > 0) {res.writeHead(503,{'content-type':'text/plain'}).end('projects temporarily unavailable');return;}
     res.setHeader('content-type','application/json');
-    res.end(JSON.stringify(url.pathname === '/api/snapshot' ? snapshot() : url.pathname === '/api/jobs' ? [] : {projects:['fixture'],harnesses:['codex']})); return;
+    res.end(JSON.stringify(url.pathname === '/api/snapshot' ? snapshot() : url.pathname === '/api/jobs' ? [] : url.pathname === '/api/search' ? searchResult : {projects:['fixture'],harnesses:['codex']})); return;
   }
   const files = {'/':'dashboard.html','/dashboard.js':'dashboard.js','/dashboard.css':'dashboard.css'};
   const file=files[url.pathname]; if(!file){res.writeHead(404).end();return;}
@@ -46,6 +47,13 @@ try {
   assert.equal(await page.locator('#send').isEnabled(),false);
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.waitForFunction(()=>!document.getElementById('send').disabled,null,{timeout:2000});
+  searchResult=[{id:'array-search',text:'Array search result'}];
+  await page.locator('#query').fill('fixture');
+  await page.locator('#search').evaluate(form=>form.requestSubmit());
+  await page.locator('#results').getByText('Array search result',{exact:true}).waitFor();
+  searchResult={rows:[{id:'object-search',text:'Object search result'}]};
+  await page.locator('#search').evaluate(form=>form.requestSubmit());
+  await page.locator('#results').getByText('Object search result',{exact:true}).waitFor();
   await page.locator('#proxx-budgets').getByText(/Today: \$0.250 remaining of \$0.500/).waitFor();
   assert.match(await page.locator('#proxx-budgets').textContent(),/\$3.850 remaining of \$5.000/);
   assert.match(await page.locator('#proxx-budgets').textContent(),/Carried holds: \$0.050/);

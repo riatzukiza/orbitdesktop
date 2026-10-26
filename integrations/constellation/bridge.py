@@ -453,6 +453,9 @@ def mcp(cfg):
         try:
             if len(line)>MAX_BODY:raise ValueError('Request exceeds limit')
             request=json.loads(line)
+            if not isinstance(request,dict):
+                request={}
+                raise ValueError('Request must be a JSON object')
             if 'id' not in request:continue
             method=request.get('method')
             if method=='initialize':

@@ -1,6 +1,7 @@
 """Boundary and recovery checks. No model calls or production mutations."""
 import importlib.util
 import json
+import io
 import os
 import signal
 import threading
@@ -50,6 +51,18 @@ class BridgeTests(unittest.TestCase):
             result=bridge.submit(self.cfg,self.args)
         self.assertEqual(result['state'],'accepted')
         self.assertNotIn('pid',result)
+
+    def test_mcp_non_object_lines_refuse_without_stopping_next_request(self):
+        stream='\n'.join([json.dumps(value) for value in [None,42,'x',[],{'jsonrpc':'2.0','id':7,'method':'ping'}]])+'\n'
+        output=io.StringIO()
+        with patch.object(bridge.sys,'stdin',io.StringIO(stream)),patch.object(bridge.sys,'stdout',output):
+            bridge.mcp(self.cfg)
+        rows=[json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(len(rows),5)
+        for row in rows[:-1]:
+            self.assertIsNone(row['id'])
+            self.assertIn('error',row)
+        self.assertEqual(rows[-1],{'jsonrpc':'2.0','id':7,'result':{}})
 
     def test_upstream_errors_never_reflect_token_or_response(self):
         self.assertEqual(bridge.safe_error(ValueError('secret-token')),'ValueError')

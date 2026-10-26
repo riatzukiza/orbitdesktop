@@ -13,7 +13,7 @@ const el = (tag, text, cls) => {
   if (cls) node.className = cls;
   return node;
 };
-async function api(path, body, { array = false } = {}) {
+async function api(path, body, { array } = {}) {
   const response = await fetch("api/" + path, {
     method: body ? "POST" : "GET",
     headers: {
@@ -32,7 +32,7 @@ async function api(path, body, { array = false } = {}) {
   }
   if (!response.ok)
     throw Error(`HTTP ${response.status}: ${value?.error || text.slice(0, 300) || "Request failed"}`);
-  if (!value || typeof value !== "object" || Array.isArray(value) !== array)
+  if (!value || typeof value !== "object" || (array !== undefined && Array.isArray(value) !== array))
     throw Error(`HTTP ${response.status}: invalid JSON response`);
   $("unlock").hidden = true;
   return value;
