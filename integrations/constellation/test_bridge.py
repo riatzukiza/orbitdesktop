@@ -40,6 +40,17 @@ class BridgeTests(unittest.TestCase):
             self.assertNotIn('prompt',first)
             with self.assertRaises(ValueError):bridge.submit(self.cfg,{**self.args,'prompt':'changed'})
             self.assertEqual(thread.call_count,1)
+    def test_submission_response_is_snapshotted_before_worker_mutation(self):
+        class ImmediateThread:
+            def __init__(self, target, args, daemon):
+                self.record=args[1]
+            def start(self):
+                self.record.update(state='running',pid=123,process_start='fixture')
+        with patch.object(bridge,'executable',return_value='/usr/bin/harness'),patch.object(bridge.threading,'Thread',ImmediateThread):
+            result=bridge.submit(self.cfg,self.args)
+        self.assertEqual(result['state'],'accepted')
+        self.assertNotIn('pid',result)
+
     def test_upstream_errors_never_reflect_token_or_response(self):
         self.assertEqual(bridge.safe_error(ValueError('secret-token')),'ValueError')
     def test_peer_script_cannot_inject_a_shell_command(self):

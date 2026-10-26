@@ -49,6 +49,35 @@ try {
   await page.locator('#proxx-budgets').getByText(/Today: \$0.250 remaining of \$0.500/).waitFor();
   assert.match(await page.locator('#proxx-budgets').textContent(),/\$3.850 remaining of \$5.000/);
   assert.match(await page.locator('#proxx-budgets').textContent(),/Carried holds: \$0.050/);
+
+  const budgetLayout = await page.locator('#proxx-budgets article').evaluate(card => ({
+    width:card.getBoundingClientRect().width, childWidth:card.firstElementChild.getBoundingClientRect().width,
+    wrap:getComputedStyle(card.querySelector('p')).whiteSpace,
+  }));
+  assert.ok(budgetLayout.childWidth > budgetLayout.width * .9, 'budget text spans its card');
+  assert.equal(budgetLayout.wrap,'normal');
+  let releaseSubmit, releaseProjects, submitSeen, projectsSeen;
+  const submitGate=new Promise(resolve=>releaseSubmit=resolve), projectsGate=new Promise(resolve=>releaseProjects=resolve);
+  const submitted=new Promise(resolve=>submitSeen=resolve), discovering=new Promise(resolve=>projectsSeen=resolve);
+  await page.route('**/api/submit',async route=>{submitSeen();await submitGate;await route.fulfill({json:{id:'fixture-worker',state:'accepted'}})});
+  await page.route('**/api/projects',async route=>{projectsSeen();await projectsGate;await route.fulfill({json:{projects:['fixture-yoga'],harnesses:['codex']}})});
+  await page.locator('#prompt').fill('Synthetic fixture only');
+  await page.locator('#confirm').check();
+  await page.locator('#send').click(); await submitted;
+  await page.locator('#target').evaluate(select=>select.add(new Option('yoga','yoga')));
+  await page.locator('#target').selectOption('yoga'); await discovering;
+  assert.equal(await page.locator('#confirm').isChecked(),false);
+  assert.equal(await page.locator('#project option').count(),0);
+  assert.equal(await page.locator('#harness option').count(),0);
+  assert.equal(await page.locator('#send').isEnabled(),false);
+  releaseSubmit();
+  await page.locator('#dispatch-status').getByText('Worker fixture-worker · accepted',{exact:true}).waitFor();
+  assert.equal(await page.locator('#send').isEnabled(),false,'old submission cannot enable dispatch during discovery');
+  releaseProjects();
+  await page.waitForFunction(()=>!document.getElementById('send').disabled);
+  assert.equal(await page.locator('#project').inputValue(),'fixture-yoga');
+  await page.unroute('**/api/submit'); await page.unroute('**/api/projects');
+
   assert.match(await page.locator('#proxx-routes').textContent(),/google\/gemma-4-31b-it/);
   assert.match(await page.locator('#proxx-routes').textContent(),/\$0.0000/);
   assert.match(await page.locator('#proxx-routes').textContent(),/Unknown provider/);

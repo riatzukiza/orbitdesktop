@@ -386,12 +386,13 @@ def submit(cfg, args):
                 'created_at':now(),'updated_at':now(), 'answer':'',
                 'target':'New CLI worker; existing desktop chats are not resumed'}
         write_private(path,record)
+        accepted=public_job(record)
         # The HTTP host owns this process. SSH rpc forks an explicit worker below.
         if os.environ.get('ORBIT_CONSTELLATION_RPC')=='1':
             subprocess.Popen([sys.executable,str(ROOT/'bridge.py'),'worker',key],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
         else:
             threading.Thread(target=run_job,args=(cfg,record,command,directory,prompt),daemon=True).start()
-    return public_job(record)
+    return accepted
 
 
 def jobs(cfg):

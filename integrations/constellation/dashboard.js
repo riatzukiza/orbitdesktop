@@ -4,6 +4,8 @@ let token = sessionStorage.getItem("orbit.constellation.token") || "";
 let current,
   busy = false,
   dispatchHost = "",
+  dispatchGeneration = 0,
+  submissionPending = false,
   retainedSubmission;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
@@ -111,7 +113,7 @@ function renderProxx(result) {
   if (!data?.configured) return;
   if (data.budgets?.ok) {
     for (const budget of data.budgets.data.budgets || []) {
-      const card = el("article", undefined, "session");
+      const card = el("article", undefined, "budget-card");
       const text = el("div");
       text.append(el("h3", budget.scopeId));
       if (budget.status === "ok") {
@@ -322,23 +324,32 @@ async function refresh() {
     $("refresh").disabled = false;
   }
 }
+function updateDispatchButton() {
+  $("send").disabled = submissionPending || dispatchHost !== $("target").value
+    || !$("project").value || !$("harness").value;
+}
 async function projects() {
   const target = $("target").value;
+  const generation = ++dispatchGeneration;
   dispatchHost = "";
+  $("confirm").checked = false;
+  $("project").replaceChildren();
+  $("harness").replaceChildren();
+  $("send").disabled = true;
   try {
     const data = await api("projects", { host: target });
-    if (target !== $("target").value) return;
+    if (generation !== dispatchGeneration || target !== $("target").value) return;
     dispatchHost = target;
     $("project").replaceChildren(...data.projects.map((p) => new Option(p, p)));
     $("harness").replaceChildren(
       ...data.harnesses.map((p) => new Option(p, p)),
     );
-    $("send").disabled = !data.projects.length || !data.harnesses.length;
+    updateDispatchButton();
     $("dispatch-status").textContent = data.projects.length
       ? ""
       : "No dispatch project is configured for this account on this machine.";
   } catch (error) {
-    if (target !== $("target").value) return;
+    if (generation !== dispatchGeneration || target !== $("target").value) return;
     $("send").disabled = true;
     $("dispatch-status").textContent = error.message;
   }
@@ -413,6 +424,7 @@ $("search").onsubmit = async (event) => {
 };
 $("dispatch").onsubmit = async (event) => {
   event.preventDefault();
+  if (submissionPending || !dispatchHost || dispatchHost !== $("target").value) return;
   const request = {
     host: $("target").value,
     harness: $("harness").value,
@@ -425,7 +437,8 @@ $("dispatch").onsubmit = async (event) => {
     JSON.stringify(retainedSubmission.request) !== JSON.stringify(request)
   )
     retainedSubmission = { request, operation_id: crypto.randomUUID() };
-  $("send").disabled = true;
+  submissionPending = true;
+  updateDispatchButton();
   try {
     const job = await api("submit", {
       ...request,
@@ -440,7 +453,8 @@ $("dispatch").onsubmit = async (event) => {
       error.message +
       " · The exact operation ID is retained for recovery; do not start a duplicate.";
   } finally {
-    $("send").disabled = false;
+    submissionPending = false;
+    updateDispatchButton();
   }
 };
 refresh();

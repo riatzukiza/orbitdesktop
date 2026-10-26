@@ -470,3 +470,14 @@ footer {
 .evaluation-table table { width: 100%; border-collapse: collapse; }
 .evaluation-table th, .evaluation-table td { text-align: left; padding: .6rem; border-bottom: 1px solid #ffffff18; }
 #evaluation-evidence { overflow-wrap: anywhere; }
+
+.budget-card {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 15px 0;
+  border-top: 1px solid #25313c;
+}
+.budget-card h3, .budget-card p {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
