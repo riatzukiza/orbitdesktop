@@ -115,14 +115,14 @@ function renderProxx(result) {
       const text = el("div");
       text.append(el("h3", budget.scopeId));
       if (budget.status === "ok") {
-        const u = budget.usage;
+        const u = budget.usage || {};
         text.append(el("p", "Today: " + dollars(budget.dailyRemainingMicrousd) + " remaining of " + dollars(budget.dailyMicrousd)
           + " · Month: " + dollars(budget.monthlyRemainingMicrousd) + " remaining of " + dollars(budget.monthlyMicrousd)));
         text.append(el("p", "Confirmed: " + dollars(u.dailyChargedMicrousd) + " today / " + dollars(u.monthlyChargedMicrousd)
-          + " this month · Held: " + dollars(u.heldMicrousd) + " (" + u.unresolvedCount + " unresolved)"));
+          + " this month · Held: " + dollars(u.heldMicrousd) + " (" + (Number.isSafeInteger(u.unresolvedCount) && u.unresolvedCount >= 0 ? u.unresolvedCount : "Unknown") + " unresolved)"));
         text.append(el("p", "Carried holds: " + dollars(u.dailyCarriedMicrousd) + " from prior days / " + dollars(u.monthlyCarriedMicrousd) + " from prior months", "muted"));
       } else text.append(el("p", "Ledger unavailable; remaining allowance is unknown.", "muted"));
-      text.append(el("p", "Allowed routes: " + (budget.routes || []).map(r => r.upstreamModel + " [" + r.billing + "]").join(" · "), "muted"));
+      text.append(el("p", "Allowed routes: " + (budget.routes || []).map(r => (typeof r?.upstreamModel === "string" && r.upstreamModel ? r.upstreamModel : "Unknown model") + " [" + (typeof r?.billing === "string" && r.billing ? r.billing : "Unknown billing") + "]").join(" · "), "muted"));
       card.append(text); $("proxx-budgets").append(card);
     }
   } else $("proxx-budgets").append(el("p", "Budget API unavailable; remaining allowance is unknown.", "muted"));
@@ -323,9 +323,12 @@ async function refresh() {
   }
 }
 async function projects() {
-  dispatchHost = $("target").value;
+  const target = $("target").value;
+  dispatchHost = "";
   try {
-    const data = await api("projects", { host: dispatchHost });
+    const data = await api("projects", { host: target });
+    if (target !== $("target").value) return;
+    dispatchHost = target;
     $("project").replaceChildren(...data.projects.map((p) => new Option(p, p)));
     $("harness").replaceChildren(
       ...data.harnesses.map((p) => new Option(p, p)),
@@ -335,6 +338,7 @@ async function projects() {
       ? ""
       : "No dispatch project is configured for this account on this machine.";
   } catch (error) {
+    if (target !== $("target").value) return;
     $("send").disabled = true;
     $("dispatch-status").textContent = error.message;
   }

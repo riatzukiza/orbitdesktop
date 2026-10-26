@@ -296,7 +296,7 @@ export async function createResourceDelegation({root,workspaceRead,knowledge,doc
     }catch(error){
       // Keep an oversized request from destroying the refusal response on Node 22.
       // Drain without retaining bytes; close the connection after the response.
-      if(!req.complete){req.resume();res.setHeader('Connection','close');}
+      if(!req.readableEnded){req.resume();res.setHeader('Connection','close');}
       if(owned&&error.channel_retirement==='completed')try{retire(req.headers['x-orbit-recipient'],'completed');}catch{/* Retain the slot/receipt on cleanup IO failure. */}
       const code=codes.has(error.code)?error.code:'unavailable';let outcome='refused';
       if(owned&&['create_document','revise_document'].includes(body?.action)&&uuid.test(body.op_id??'')&&!['operation_mismatch','invalid_request','permission_denied','limit_exceeded'].includes(code)){

@@ -32,6 +32,7 @@ test('real gateway preserves valid login and confines forwarded terminal frames'
   const sockets=[];
   try {
     for(let i=0;i<60;i++) {try {if((await fetch(base+'/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,50));}
+    assert.equal((await fetch(base+'/constellation/api/tool',{method:'POST',headers:{Origin:base,Authorization:'Bearer undefined','Content-Type':'application/json'},body:'{}'})).status,401,'missing MCP configuration must never authenticate a literal undefined token');
     const login=token=>fetch(base+'/login',{method:'POST',redirect:'manual',headers:{Origin:base,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({token})});
     for(let i=0;i<14;i++)assert.ok([401,429].includes((await login('wrong')).status));
     const valid=await login(token);assert.equal(valid.status,303);

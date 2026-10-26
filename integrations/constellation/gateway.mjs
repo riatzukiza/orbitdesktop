@@ -244,6 +244,7 @@ const server = http.createServer(async (req, res) => {
     if (
       url.pathname === "/constellation/api/tool" &&
       req.method === "POST" &&
+      typeof cfg.token === "string" && cfg.token.trim().length > 0 &&
       equal(req.headers.authorization, "Bearer " + cfg.token)
     ) {
       return proxy(req, res, cfg.port, "/api/tool", await body(req, 65536), {

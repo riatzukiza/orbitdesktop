@@ -76,8 +76,10 @@ claude mcp add --scope user orbit-constellation -- python3 /path/to/bridge.py mc
 OpenCode's MCP entry uses `type: "local"`,
 `command: ["python3", "/path/to/bridge.py", "mcp"]`, `enabled: true`.
 If its config is generated, change the canonical configuration source, not the
-generated JSON. Its authenticated `POST /mcp` endpoint can attach the adapter to
-an already running server without terminating sessions. Existing Codex/Claude
+generated JSON. The OpenCode server’s own authenticated `POST /mcp` endpoint
+([OpenCode server API](https://dev.opencode.ai/docs/server/#lsp-formatters--mcp))
+can attach the adapter to an already running OpenCode server without terminating
+sessions; this is not an Orbit or Constellation endpoint. Existing Codex/Claude
 clients may need a new session or MCP reconnect to discover a newly registered
 server. Registration does not inject tools into an already running desktop chat.
 

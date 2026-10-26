@@ -13,7 +13,8 @@ let budgets = { ok: true, data: { budgets: [{ scopeId: 'bot', status: 'ok', dail
     dailyCarriedMicrousd: 50000, monthlyCarriedMicrousd: 20000, unresolvedCount: 2 },
   routes: [{ upstreamModel: 'google/gemma-4-31b-it', billing: 'free' }] }] } };
 let sampleCount = 96;
-const snapshot = () => ({ hosts: {}, links: {}, openplanner: {ok:false}, observed_at: new Date().toISOString(),
+let projectFailures = 1;
+const snapshot = () => ({ hosts: {stealth:{ok:false,error:"fixture unavailable"}}, links: {}, openplanner: {ok:false}, observed_at: new Date().toISOString(),
   evaluation:{ok:true,data:{configured:true,sourceSha256:'a'.repeat(64),sampleCount,observedAt:'fixture',scope:'Single window; fixture only',decision:'Not a live adoption claim',summary:[{model:'e4b',condition:'clean',samples:24,completed:22,timeouts:2,httpErrors:0,firstUsableP50Ms:7000,firstUsableP95Ms:13000,grounding:43,instruction:32,toolCorrectness:44,qualityMaximumPerDimension:44}] }},
   proxx: {ok:true, data: {configured:true,label:'Fixture ledger',observed_at:new Date().toISOString(),budgets,
     usage:{ok:true,data:{entries:[{providerId:'requesty',model:'gemma4:31b',upstreamModel:'google/gemma-4-31b-it',
@@ -25,8 +26,9 @@ const server = createServer(async (req,res) => {
     if (url.pathname === '/api/snapshot' && snapshotFailure) {
       res.writeHead(snapshotFailure.status, {'content-type':'text/plain'}).end(snapshotFailure.body); return;
     }
+    if (url.pathname === '/api/projects' && projectFailures-- > 0) {res.writeHead(503,{'content-type':'text/plain'}).end('projects temporarily unavailable');return;}
     res.setHeader('content-type','application/json');
-    res.end(JSON.stringify(url.pathname === '/api/snapshot' ? snapshot() : url.pathname === '/api/jobs' ? [] : {projects:[],harnesses:[]})); return;
+    res.end(JSON.stringify(url.pathname === '/api/snapshot' ? snapshot() : url.pathname === '/api/jobs' ? [] : {projects:['fixture'],harnesses:['codex']})); return;
   }
   const files = {'/':'dashboard.html','/dashboard.js':'dashboard.js','/dashboard.css':'dashboard.css'};
   const file=files[url.pathname]; if(!file){res.writeHead(404).end();return;}
@@ -40,6 +42,10 @@ try {
   const page = await browser.newPage({viewport:{width:1100,height:900}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port);
+  await page.locator('#dispatch-status').getByText('HTTP 503: projects temporarily unavailable',{exact:true}).waitFor();
+  assert.equal(await page.locator('#send').isEnabled(),false);
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.waitForFunction(()=>!document.getElementById('send').disabled,null,{timeout:2000});
   await page.locator('#proxx-budgets').getByText(/Today: \$0.250 remaining of \$0.500/).waitFor();
   assert.match(await page.locator('#proxx-budgets').textContent(),/\$3.850 remaining of \$5.000/);
   assert.match(await page.locator('#proxx-budgets').textContent(),/Carried holds: \$0.050/);
@@ -54,6 +60,13 @@ try {
   sampleCount=null;
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.locator('#evaluation-evidence').getByText(/Unknown samples/).waitFor();
+  budgets={ok:true,data:{budgets:[{scopeId:'partial',status:'ok',usage:{},routes:[{}]}]}};
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await page.locator('#proxx-budgets').getByRole('heading',{name:'partial',exact:true}).waitFor();
+  const partial=await page.locator('#proxx-budgets').textContent();
+  assert.doesNotMatch(partial,/undefined|null/);
+  assert.match(partial,/Unknown unresolved/);
+  assert.match(partial,/Unknown model \[Unknown billing\]/);
   budgets={ok:false,error:'unavailable'};
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await page.locator('#proxx-budgets').getByText(/remaining allowance is unknown/).waitFor();
