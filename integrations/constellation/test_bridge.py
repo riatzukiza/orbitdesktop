@@ -86,6 +86,22 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['native_session_id'],'native-fixture')
         self.assertEqual(result['answer'].strip(),'Verified fixture answer')
 
+    def test_worker_skips_non_objects_and_malformed_nested_events(self):
+        malformed = [None, 42, 'x', [], {'part': None}, {'part': []},
+                     {'type': 'item.completed', 'item': 42},
+                     {'type': 'assistant', 'message': 'x'},
+                     {'type': 'assistant', 'message': {'content': None}},
+                     {'type': 'assistant', 'message': {'content': [None, 42, {'type': 'text', 'text': []}]}},
+                     {'type': 'text', 'part': {'text': 42}}]
+        valid = [{'type': 'thread.started', 'thread_id': 'native-after-noise'},
+                 {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Recovered'}}]
+        script = 'import sys,json; sys.stdin.read(); rows=' + repr(malformed + valid) + '; [print(json.dumps(row),flush=True) for row in rows]'
+        record = {'id': str(uuid.uuid4()), 'host': 'fixture', 'state': 'accepted'}
+        bridge.run_job(self.cfg, record, [sys.executable, '-c', script], self.temp.name, 'fixture')
+        self.assertEqual(record['state'], 'completed')
+        self.assertEqual(record['native_session_id'], 'native-after-noise')
+        self.assertEqual(record['answer'].strip(), 'Recovered')
+
     def test_worker_that_closes_stdout_cannot_leave_an_unbounded_exit_wait(self):
         record = {'id': str(uuid.uuid4()), 'host': 'fixture', 'state': 'accepted'}
         real_popen = bridge.subprocess.Popen

@@ -34,7 +34,7 @@ const server = createServer(async (req,res) => {
   const files = {'/':'dashboard.html','/dashboard.js':'dashboard.js','/dashboard.css':'dashboard.css'};
   const file=files[url.pathname]; if(!file){res.writeHead(404).end();return;}
   res.setHeader('content-type', file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html');
-  res.end(await readFile(path.join(root,file)));
+  res.end(await readFile(file==='dashboard.js' && process.env.ORBIT_TEST_DASHBOARD_SOURCE || path.join(root,file)));
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 let browser;
@@ -87,6 +87,33 @@ try {
   await page.waitForFunction(()=>!document.getElementById('send').disabled);
   assert.equal(await page.locator('#project').inputValue(),'fixture-yoga');
   await page.unroute('**/api/submit'); await page.unroute('**/api/projects');
+
+  // The bridge may accept a request even when its HTTP response is lost.
+  await page.locator('#target').selectOption('stealth');
+  await page.waitForFunction(()=>!document.getElementById('send').disabled);
+  let releaseLostSubmit, lostSubmitSeen;
+  const lostSubmitGate=new Promise(resolve=>releaseLostSubmit=resolve), lostSubmitted=new Promise(resolve=>lostSubmitSeen=resolve);
+  const recoveredRequests=[];
+  await page.route('**/api/submit',async route=>{
+    recoveredRequests.push(route.request().postDataJSON());
+    if(recoveredRequests.length===1){lostSubmitSeen();await lostSubmitGate;await route.abort('failed');}
+    else await route.fulfill({json:{id:'recovered-worker',state:'accepted'}});
+  });
+  await page.locator('#prompt').fill('Recover identical request');
+  await page.locator('#confirm').check();
+  await page.locator('#send').click(); await lostSubmitted;
+  await page.locator('#target').selectOption('yoga');
+  await page.locator('#project option').getByText('fixture',{exact:true}).waitFor({state:'attached'});
+  releaseLostSubmit();
+  await page.locator('#dispatch-status').getByText(/exact operation ID is retained/).waitFor();
+  await page.locator('#target').selectOption('stealth');
+  await page.waitForFunction(()=>!document.getElementById('send').disabled);
+  await page.locator('#confirm').check();
+  await page.locator('#send').click();
+  await page.locator('#dispatch-status').getByText('Worker recovered-worker · accepted',{exact:true}).waitFor();
+  assert.equal(recoveredRequests.length,2);
+  assert.deepEqual(recoveredRequests[1],recoveredRequests[0],'unknown submission retains its exact request and operation ID across host changes');
+  await page.unroute('**/api/submit');
 
   let releaseOldJobs, oldJobsSeen;
   const oldJobsGate=new Promise(resolve=>releaseOldJobs=resolve), oldJobsRequested=new Promise(resolve=>oldJobsSeen=resolve);

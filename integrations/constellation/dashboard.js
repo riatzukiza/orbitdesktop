@@ -8,8 +8,8 @@ let current,
   dispatchHost = "",
   dispatchGeneration = 0,
   jobsGeneration = 0,
-  submissionPending = false,
-  retainedSubmission;
+  submissionPending = false;
+const retainedSubmissions = new Map();
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -397,7 +397,6 @@ $("filter").onchange = renderSessions;
 $("target").onchange = async () => {
   jobsGeneration++;
   $("jobs").replaceChildren();
-  retainedSubmission = undefined;
   await projects();
   await refreshJobs();
 };
@@ -441,11 +440,12 @@ $("dispatch").onsubmit = async (event) => {
     prompt: $("prompt").value,
     confirm: $("confirm").checked,
   };
-  if (
-    !retainedSubmission ||
-    JSON.stringify(retainedSubmission.request) !== JSON.stringify(request)
-  )
+  const requestKey = JSON.stringify(request);
+  let retainedSubmission = retainedSubmissions.get(requestKey);
+  if (!retainedSubmission) {
     retainedSubmission = { request, operation_id: crypto.randomUUID() };
+    retainedSubmissions.set(requestKey, retainedSubmission);
+  }
   submissionPending = true;
   updateDispatchButton();
   try {
@@ -454,7 +454,7 @@ $("dispatch").onsubmit = async (event) => {
       operation_id: retainedSubmission.operation_id,
     });
     $("dispatch-status").textContent = "Worker " + job.id + " · " + job.state;
-    retainedSubmission = undefined;
+    retainedSubmissions.delete(requestKey);
     $("confirm").checked = false;
     await refreshJobs();
   } catch (error) {

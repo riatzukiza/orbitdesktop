@@ -340,18 +340,25 @@ def run_job(cfg, record, command, directory, prompt):
                         event=json.loads(raw)
                     except (ValueError,UnicodeError):
                         continue
-                    native_id=event.get('thread_id') if event.get('type')=='thread.started' else event.get('session_id') or event.get('sessionID') or event.get('part',{}).get('sessionID')
+                    if not isinstance(event,dict):continue
+                    if any(key in event and not isinstance(event[key],dict) for key in ('part','item','message')):continue
+                    part=event.get('part',{})
+                    item=event.get('item',{})
+                    message=event.get('message',{})
+                    native_id=event.get('thread_id') if event.get('type')=='thread.started' else event.get('session_id') or event.get('sessionID') or part.get('sessionID')
                     if isinstance(native_id,str) and len(native_id)<=160 and record.get('native_session_id')!=native_id:
                         record['native_session_id']=native_id
                         write_private(path,record)
                     text=''
-                    if event.get('type')=='item.completed' and event.get('item',{}).get('type')=='agent_message':
-                        text=event['item'].get('text','')
+                    if event.get('type')=='item.completed' and item.get('type')=='agent_message':
+                        text=item.get('text','')
                     elif event.get('type')=='assistant':
-                        text='\n'.join(part.get('text','') for part in event.get('message',{}).get('content',[]) if part.get('type')=='text')
+                        content=message.get('content',[])
+                        if not isinstance(content,list):continue
+                        text='\n'.join(p['text'] for p in content if isinstance(p,dict) and p.get('type')=='text' and isinstance(p.get('text'),str))
                     elif event.get('type')=='text':
-                        text=event.get('part',{}).get('text','')
-                    if text:
+                        text=part.get('text','')
+                    if isinstance(text,str) and text:
                         record['answer']=(record.get('answer','')+'\n'+text)[-32000:]
                         record['updated_at']=now();write_private(path,record)
                 code=process.wait(timeout=10)
