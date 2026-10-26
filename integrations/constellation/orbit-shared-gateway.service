@@ -1,0 +1,17 @@
+[Unit]
+Description=orbit-shared-gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=ORBIT_CONSTELLATION_CONFIG=/home/err/.config/orbit/constellation.json
+Environment=PATH=/home/err/.bun/bin:/home/err/.local/bin:/home/err/.opencode/bin:/home/err/.volta/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/err/spaces/orbitdesktop
+ExecStart=/home/err/.volta/tools/image/node/24.14.1/bin/node /home/err/spaces/orbitdesktop/integrations/constellation/gateway.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

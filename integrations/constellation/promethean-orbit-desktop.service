@@ -1,0 +1,14 @@
+[Unit]
+Description=Relay Caddy to the private Orbit SSH forward
+Requires=promethean-orbit-desktop.socket
+After=network.target
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:19784
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+IPAddressDeny=any
+IPAddressAllow=172.31.255.2/32
+IPAddressAllow=127.0.0.1/32

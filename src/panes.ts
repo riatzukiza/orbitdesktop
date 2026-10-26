@@ -11,6 +11,7 @@ import { hostSurfaceId, mountHostSurface } from './host-surfaces';
 import {documentSurfaceId} from './technology-surfaces';
 import { bindToolFeed } from "./tool-feed";
 import type { Pane, PaneKind } from "./model";
+import { sharedOrbitSession, isConstellationDashboard } from './constellation-session';
 export interface PaneView {
   element: HTMLElement;
   resize: () => void;
@@ -24,7 +25,7 @@ export interface PaneActions {
   move?: (id: string, popout: boolean) => void;
   url: (id: string, url: string) => void;
 }
-export let sessionToken = "";
+export let sessionToken = sharedOrbitSession?.token || "";
 export function setToken(t: string) {
   sessionToken = t;
   window.dispatchEvent(new Event('orbit-host-connected'));
@@ -426,7 +427,8 @@ export function createPane(p: Pane, font: number, a: PaneActions): PaneView {
         )
           throw Error();
         const localApp = u.origin === location.origin && /^\/apps\/[a-z0-9][a-z0-9-]{0,60}\//.test(u.pathname);
-        if (u.origin === location.origin && !localApp)
+        const constellation = isConstellationDashboard(u, location.origin, !!sharedOrbitSession);
+        if (u.origin === location.origin && !localApp && !constellation)
           throw Error("The Orbit host cannot be embedded.");
         if (localApp) {
           head.style.display = "none";
@@ -441,7 +443,7 @@ export function createPane(p: Pane, font: number, a: PaneActions): PaneView {
         frame.referrerPolicy = "no-referrer";
         frame.setAttribute(
           "sandbox",
-          localApp ? "allow-scripts allow-forms allow-modals allow-downloads" : "allow-scripts allow-forms allow-same-origin allow-popups",
+          localApp ? "allow-scripts allow-forms allow-modals allow-downloads" : constellation ? "allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" : "allow-scripts allow-forms allow-same-origin allow-popups",
         );
         frame.src = current;
         surface.replaceChildren(frame);
